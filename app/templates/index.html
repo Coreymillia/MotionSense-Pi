@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MotionSense Pi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Smart Room Monitor</p>
+          <h1>MotionSense Pi</h1>
+          <p class="subtle">Snapshot-first dashboard for the Pi Camera and Sense HAT.</p>
+        </div>
+        <div class="actions">
+          <button id="capture-button" class="primary">Take Snapshot</button>
+          <button id="refresh-button">Refresh Status</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card">
+          <div class="card-header">
+            <h2>Camera</h2>
+            <div class="actions compact">
+              <select id="camera-source-select"></select>
+              <button id="camera-source-button">Use Camera</button>
+            </div>
+          </div>
+          <dl>
+            <div>
+              <dt>Available</dt>
+              <dd id="camera-available">{{ "Yes" if status.camera.available else "No" }}</dd>
+            </div>
+            <div>
+              <dt>Active Source</dt>
+              <dd id="camera-source-name">{{ status.camera.active_source_name or "Unavailable" }}</dd>
+            </div>
+            <div>
+              <dt>Backend</dt>
+              <dd id="camera-backend">{{ status.camera.backend or "Unavailable" }}</dd>
+            </div>
+            <div>
+              <dt>Target</dt>
+              <dd id="camera-target">{{ status.camera.target or "Unavailable" }}</dd>
+            </div>
+            <div>
+              <dt>Resolution</dt>
+              <dd id="camera-resolution">{{ status.camera.resolution.width }} x {{ status.camera.resolution.height }}</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="card">
+          <h2>Sense HAT</h2>
+          <dl id="sensehat-panel"></dl>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>Motion Detector</h2>
+            <div class="actions compact">
+              <button id="motion-start-button">Arm</button>
+              <button id="motion-stop-button">Pause</button>
+            </div>
+          </div>
+          <dl id="motion-panel"></dl>
+        </article>
+
+        <article class="card">
+          <h2>Device</h2>
+          <dl>
+            <div>
+              <dt>Host</dt>
+              <dd id="host-name">{{ status.host }}</dd>
+            </div>
+            <div>
+              <dt>Updated</dt>
+              <dd id="generated-at">{{ status.generated_at }}</dd>
+            </div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="snapshot card">
+        <div class="snapshot-header">
+          <div>
+            <h2>Latest Snapshot</h2>
+            <p id="snapshot-meta" class="subtle">
+              {% if status.snapshot.exists %}
+                Captured at {{ status.snapshot.modified_at }}
+              {% else %}
+                No snapshot captured yet.
+              {% endif %}
+            </p>
+          </div>
+        </div>
+        <div class="snapshot-frame">
+          <img
+            id="snapshot-image"
+            alt="Latest room snapshot"
+            {% if status.snapshot.exists %}
+            src="{{ status.snapshot.url }}"
+            {% endif %}
+          >
+          <div id="snapshot-empty" class="empty-state {% if status.snapshot.exists %}hidden{% endif %}">
+            Capture a snapshot to verify the camera path.
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <h2>Motion Events</h2>
+            <p class="subtle">Recent motion-triggered captures appear here.</p>
+          </div>
+        </div>
+        <div id="event-list" class="event-list"></div>
+      </section>
+
+      <p id="message" class="message" aria-live="polite"></p>
+    </main>
+
+    <script id="initial-status" type="application/json">{{ status | tojson }}</script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
