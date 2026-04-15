@@ -4,6 +4,8 @@ const captureButton = document.getElementById("capture-button");
 const refreshButton = document.getElementById("refresh-button");
 const cameraSourceSelect = document.getElementById("camera-source-select");
 const cameraSourceButton = document.getElementById("camera-source-button");
+const networkCameraUrl = document.getElementById("network-camera-url");
+const networkCameraButton = document.getElementById("network-camera-button");
 const motionStartButton = document.getElementById("motion-start-button");
 const motionStopButton = document.getElementById("motion-stop-button");
 const message = document.getElementById("message");
@@ -61,6 +63,7 @@ function renderCamera(data) {
 
   cameraSourceSelect.disabled = !cameraSourceSelect.options.length;
   cameraSourceButton.disabled = cameraSourceSelect.disabled;
+  networkCameraUrl.value = data.network_camera_url || "";
 }
 
 function renderMotion(data) {
@@ -137,7 +140,7 @@ function renderEvents(events) {
 
 function renderSnapshot(snapshot) {
   if (snapshot.exists && snapshot.url) {
-    snapshotImage.src = `${snapshot.url}?t=${Date.now()}`;
+    snapshotImage.src = `${snapshot.url}?live=1&t=${Date.now()}`;
     snapshotImage.classList.remove("hidden");
     snapshotEmpty.classList.add("hidden");
     snapshotMeta.textContent = `Captured at ${snapshot.modified_at}`;
@@ -219,6 +222,26 @@ async function setCameraSource() {
   message.textContent = "Camera source updated.";
 }
 
+async function saveNetworkCameraUrl() {
+  message.textContent = "Saving ESP32-CAM URL...";
+  const response = await fetch("/api/camera/network", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ url: networkCameraUrl.value }),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    message.textContent = payload.error || "ESP32-CAM URL update failed.";
+    return;
+  }
+
+  renderStatus(payload.status);
+  message.textContent = "ESP32-CAM URL saved.";
+}
+
 captureButton.addEventListener("click", () => {
   void captureSnapshot();
 });
@@ -229,6 +252,10 @@ refreshButton.addEventListener("click", () => {
 
 cameraSourceButton.addEventListener("click", () => {
   void setCameraSource();
+});
+
+networkCameraButton.addEventListener("click", () => {
+  void saveNetworkCameraUrl();
 });
 
 motionStartButton.addEventListener("click", () => {

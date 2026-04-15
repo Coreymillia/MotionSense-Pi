@@ -51,6 +51,13 @@
               <dd id="camera-resolution">{{ status.camera.resolution.width }} x {{ status.camera.resolution.height }}</dd>
             </div>
           </dl>
+          <div class="camera-config">
+            <label for="network-camera-url">ESP32-CAM URL</label>
+            <div class="actions compact">
+              <input id="network-camera-url" type="text" placeholder="http://esp32-cam.local">
+              <button id="network-camera-button">Save URL</button>
+            </div>
+          </div>
         </article>
 
         <article class="card">
@@ -98,13 +105,13 @@
           </div>
         </div>
         <div class="snapshot-frame">
-          <img
-            id="snapshot-image"
-            alt="Latest room snapshot"
-            {% if status.snapshot.exists %}
-            src="{{ status.snapshot.url }}"
-            {% endif %}
-          >
+            <img
+             id="snapshot-image"
+             alt="Latest room snapshot"
+             {% if status.snapshot.exists %}
+            src="{{ status.snapshot.url }}?live=1"
+             {% endif %}
+           >
           <div id="snapshot-empty" class="empty-state {% if status.snapshot.exists %}hidden{% endif %}">
             Capture a snapshot to verify the camera path.
           </div>

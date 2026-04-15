@@ -40,6 +40,7 @@ class MonitorService:
                 "active_source_id": self.camera.selected_source_id(),
                 "active_source_name": self.camera.selected_source_name(),
                 "backend": active_source.backend if active_source is not None else None,
+                "network_camera_url": self.camera.network_camera_url(),
                 "target": self.camera.active_capture_target(),
                 "sources": self.camera.list_sources(),
                 "resolution": {
@@ -85,5 +86,13 @@ class MonitorService:
 
     def set_camera_source(self, source_id: str) -> dict[str, object]:
         self.camera.set_active_source(source_id)
+        snapshot = self.camera.capture_snapshot()
+        self.sense_hat.show_status("capture-ok")
+        payload = self.status_payload()
+        payload["snapshot"] = self._snapshot_payload(snapshot)
+        return payload
+
+    def set_network_camera_url(self, url: str) -> dict[str, object]:
+        self.camera.set_network_camera_url(url)
         self.sense_hat.show_status("idle")
         return self.status_payload()
