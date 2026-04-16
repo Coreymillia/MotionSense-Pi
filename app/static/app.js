@@ -114,6 +114,8 @@ function renderEvents(events) {
     const card = document.createElement("article");
     card.className = "event-card";
 
+    const filename = event.snapshot_url.split("/").pop() || "motion-event.jpg";
+
     const img = document.createElement("img");
     img.alt = `Motion event ${event.detected_at}`;
     img.src = `${event.snapshot_url}?t=${Date.now()}`;
@@ -126,13 +128,23 @@ function renderEvents(events) {
 
     const path = document.createElement("p");
     path.className = "subtle";
-    path.textContent = event.snapshot_path;
+    path.textContent = filename;
 
     const badge = document.createElement("span");
     badge.className = "badge";
     badge.textContent = `Score ${event.score}`;
 
-    body.append(title, path, badge);
+    const actions = document.createElement("div");
+    actions.className = "event-card-actions";
+
+    const download = document.createElement("a");
+    download.className = "event-download";
+    download.href = event.snapshot_url;
+    download.download = filename;
+    download.textContent = "Download JPG";
+
+    actions.append(download);
+    body.append(title, path, badge, actions);
     card.append(img, body);
     eventList.append(card);
   }

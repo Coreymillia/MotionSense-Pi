@@ -211,6 +211,10 @@ dd {
   font-size: 1rem;
 }
 
+.event-card-body .subtle {
+  margin-bottom: 0.75rem;
+}
+
 .badge {
   display: inline-block;
   margin-top: 0.35rem;
@@ -219,6 +223,27 @@ dd {
   background: rgba(14, 165, 233, 0.18);
   color: #7dd3fc;
   font-size: 0.85rem;
+}
+
+.event-card-actions {
+  margin-top: 0.85rem;
+}
+
+.event-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  background: #0ea5e9;
+  color: #082f49;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.event-download:hover,
+.event-download:focus {
+  background: #38bdf8;
 }
 
 @media (max-width: 720px) {

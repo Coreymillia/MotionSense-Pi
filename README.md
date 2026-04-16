@@ -69,7 +69,7 @@ The browser dashboard supports:
 - ESP32-CAM URL storage
 - motion detector arm/pause
 - latest snapshot view
-- recent motion event thumbnails
+- recent motion event thumbnails with per-image download buttons
 - Sense HAT telemetry
 
 ### ESP32-CAM firmware
