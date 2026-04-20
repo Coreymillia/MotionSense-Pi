@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import subprocess
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from PIL import Image
@@ -27,6 +29,7 @@ def create_app(start_detector: bool = True) -> Flask:
         camera=camera,
         sense_hat=sense_hat,
         event_dir=event_dir,
+        config_path=data_dir / "motion_config.json",
     )
     monitor = MonitorService(
         camera=camera,
@@ -59,6 +62,27 @@ def create_app(start_detector: bool = True) -> Flask:
     @app.get("/")
     def index() -> str:
         return render_template("index.html", status=monitor.status_payload())
+
+    @app.get("/archive")
+    def archive() -> str:
+        return render_template(
+            "archive.html",
+            events=monitor.archived_events_payload(),
+            event_dir=str(event_dir),
+        )
+
+    def payload_filenames() -> list[str] | tuple[dict[str, object], int]:
+        payload = request.get_json(silent=True) or {}
+        filenames = payload.get("filenames")
+        if not isinstance(filenames, list) or not filenames:
+            return {"ok": False, "error": "filenames must be a non-empty list."}, 400
+
+        normalized_filenames: list[str] = []
+        for filename in filenames:
+            if not isinstance(filename, str) or not filename:
+                return {"ok": False, "error": "Each filename must be a non-empty string."}, 400
+            normalized_filenames.append(filename)
+        return normalized_filenames
 
     @app.get("/api/status")
     def api_status():
@@ -111,6 +135,80 @@ def create_app(start_detector: bool = True) -> Flask:
             return jsonify({"ok": True, "status": monitor.set_network_camera_url(camera_url)})
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/settings")
+    def api_settings():
+        payload = request.get_json(silent=True) or {}
+        has_poll_interval = "poll_interval_seconds" in payload
+        has_burst_count = "burst_count" in payload
+        if not has_poll_interval and not has_burst_count:
+            return jsonify({"ok": False, "error": "At least one setting is required."}), 400
+
+        poll_interval = payload.get("poll_interval_seconds") if has_poll_interval else None
+        burst_count = payload.get("burst_count") if has_burst_count else None
+
+        if has_poll_interval and (
+            isinstance(poll_interval, bool) or not isinstance(poll_interval, (int, float))
+        ):
+            return jsonify(
+                {"ok": False, "error": "poll_interval_seconds must be a number."}
+            ), 400
+        if has_burst_count and (
+            isinstance(burst_count, bool) or not isinstance(burst_count, int)
+        ):
+            return jsonify({"ok": False, "error": "burst_count must be an integer."}), 400
+
+        try:
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": monitor.update_capture_settings(
+                        poll_interval_seconds=float(poll_interval)
+                        if has_poll_interval
+                        else None,
+                        burst_count=burst_count if has_burst_count else None,
+                    ),
+                }
+            )
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/events/delete")
+    def api_events_delete():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            payload = monitor.delete_events(filenames)
+            return jsonify({"ok": True, **payload})
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/events/download")
+    def api_events_download():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            event_paths = monitor.selected_event_paths(filenames)
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        archive_name = datetime.now(tz=timezone.utc).strftime("motionsense-events-%Y%m%dT%H%M%SZ.zip")
+        archive_buffer = BytesIO()
+        with ZipFile(archive_buffer, mode="w", compression=ZIP_DEFLATED) as archive:
+            for event_path in event_paths:
+                archive.write(event_path, arcname=event_path.name)
+        archive_buffer.seek(0)
+        return send_file(
+            archive_buffer,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=archive_name,
+            max_age=0,
+        )
 
     @app.get("/snapshot.jpg")
     def snapshot_image():

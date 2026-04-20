@@ -15,6 +15,7 @@
           <p class="subtle">Snapshot-first dashboard for the Pi Camera and Sense HAT.</p>
         </div>
         <div class="actions">
+          <a class="button-link" href="/archive">Browse Archive</a>
           <button id="capture-button" class="primary">Take Snapshot</button>
           <button id="refresh-button">Refresh Status</button>
         </div>
@@ -50,12 +51,40 @@
               <dt>Resolution</dt>
               <dd id="camera-resolution">{{ status.camera.resolution.width }} x {{ status.camera.resolution.height }}</dd>
             </div>
+            <div>
+              <dt>Burst Count</dt>
+              <dd id="camera-burst-count">{{ status.camera.burst_count }}</dd>
+            </div>
           </dl>
           <div class="camera-config">
             <label for="network-camera-url">ESP32-CAM URL</label>
             <div class="actions compact">
               <input id="network-camera-url" type="text" placeholder="http://esp32-cam.local">
               <button id="network-camera-button">Save URL</button>
+            </div>
+          </div>
+          <div class="camera-config">
+            <label for="motion-poll-interval">Capture Settings</label>
+            <div class="actions compact settings-actions">
+              <input
+                id="motion-poll-interval"
+                type="number"
+                min="0.5"
+                max="30"
+                step="0.5"
+                value="{{ status.motion.poll_interval_seconds if status.motion else 3 }}"
+              >
+              <select id="capture-burst-count">
+                {% for count in range(1, 6) %}
+                  <option
+                    value="{{ count }}"
+                    {% if count == status.camera.burst_count %}selected{% endif %}
+                  >
+                    {{ count }} photo{% if count != 1 %}s{% endif %}
+                  </option>
+                {% endfor %}
+              </select>
+              <button id="settings-button">Save Settings</button>
             </div>
           </div>
         </article>
@@ -123,6 +152,12 @@
           <div>
             <h2>Motion Events</h2>
             <p class="subtle">Recent motion-triggered captures appear here.</p>
+          </div>
+          <div class="actions compact">
+            <button id="events-select-button" type="button">Select All</button>
+            <button id="events-download-button" type="button">Download Selected</button>
+            <button id="events-delete-button" type="button" class="danger">Delete Selected</button>
+            <a class="button-link secondary" href="/archive">Past Events</a>
           </div>
         </div>
         <div id="event-list" class="event-list"></div>

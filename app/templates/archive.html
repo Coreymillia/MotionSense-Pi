@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MotionSense Pi Archive</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="page-nav">
+        <a class="button-link" href="/">Back to Dashboard</a>
+      </nav>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Saved Motion Captures</p>
+            <h1>Event Archive</h1>
+            <p class="subtle">Browse and download older motion captures stored on the Pi.</p>
+          </div>
+          <div class="actions compact">
+            <button id="archive-select-button" type="button">Select All</button>
+            <button id="archive-download-button" type="button">Download Selected</button>
+            <button id="archive-delete-button" type="button" class="danger">Delete Selected</button>
+          </div>
+        </div>
+        <p class="subtle archive-meta">Storage path: <code>{{ event_dir }}</code></p>
+
+        <div id="archive-message" class="message" aria-live="polite"></div>
+        <div id="archive-event-list" class="event-list"></div>
+      </section>
+    </main>
+    <script id="archive-events" type="application/json">{{ events | tojson }}</script>
+    <script src="{{ url_for('static', filename='archive.js') }}"></script>
+  </body>
+</html>

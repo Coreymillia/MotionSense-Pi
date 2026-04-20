@@ -6,6 +6,9 @@ const cameraSourceSelect = document.getElementById("camera-source-select");
 const cameraSourceButton = document.getElementById("camera-source-button");
 const networkCameraUrl = document.getElementById("network-camera-url");
 const networkCameraButton = document.getElementById("network-camera-button");
+const motionPollInterval = document.getElementById("motion-poll-interval");
+const captureBurstCount = document.getElementById("capture-burst-count");
+const settingsButton = document.getElementById("settings-button");
 const motionStartButton = document.getElementById("motion-start-button");
 const motionStopButton = document.getElementById("motion-stop-button");
 const message = document.getElementById("message");
@@ -15,6 +18,11 @@ const snapshotMeta = document.getElementById("snapshot-meta");
 const senseHatPanel = document.getElementById("sensehat-panel");
 const motionPanel = document.getElementById("motion-panel");
 const eventList = document.getElementById("event-list");
+const eventsSelectButton = document.getElementById("events-select-button");
+const eventsDownloadButton = document.getElementById("events-download-button");
+const eventsDeleteButton = document.getElementById("events-delete-button");
+let currentEvents = [];
+const selectedEventFilenames = new Set();
 
 function addDefinitionRow(container, label, value) {
   const row = document.createElement("div");
@@ -50,6 +58,7 @@ function renderCamera(data) {
   document.getElementById("camera-target").textContent = data.target || "Unavailable";
   document.getElementById("camera-resolution").textContent =
     `${data.resolution.width} x ${data.resolution.height}`;
+  document.getElementById("camera-burst-count").textContent = `${data.burst_count || 1}`;
 
   cameraSourceSelect.innerHTML = "";
   for (const source of data.sources || []) {
@@ -64,6 +73,7 @@ function renderCamera(data) {
   cameraSourceSelect.disabled = !cameraSourceSelect.options.length;
   cameraSourceButton.disabled = cameraSourceSelect.disabled;
   networkCameraUrl.value = data.network_camera_url || "";
+  captureBurstCount.value = `${data.burst_count || 1}`;
 }
 
 function renderMotion(data) {
@@ -100,6 +110,16 @@ function renderMotion(data) {
 }
 
 function renderEvents(events) {
+  currentEvents = events;
+  const eventFilenames = new Set(
+    events.map((event) => event.snapshot_url.split("/").pop()).filter(Boolean),
+  );
+  for (const filename of Array.from(selectedEventFilenames)) {
+    if (!eventFilenames.has(filename)) {
+      selectedEventFilenames.delete(filename);
+    }
+  }
+
   eventList.innerHTML = "";
 
   if (!events.length) {
@@ -107,6 +127,7 @@ function renderEvents(events) {
     empty.className = "empty-state";
     empty.textContent = "No motion events yet.";
     eventList.append(empty);
+    updateEventActionButtons();
     return;
   }
 
@@ -115,6 +136,26 @@ function renderEvents(events) {
     card.className = "event-card";
 
     const filename = event.snapshot_url.split("/").pop() || "motion-event.jpg";
+    card.dataset.filename = filename;
+
+    const selection = document.createElement("label");
+    selection.className = "event-select";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedEventFilenames.has(filename);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedEventFilenames.add(filename);
+      } else {
+        selectedEventFilenames.delete(filename);
+      }
+      updateEventActionButtons();
+    });
+
+    const selectionLabel = document.createElement("span");
+    selectionLabel.textContent = "Select";
+    selection.append(checkbox, selectionLabel);
 
     const img = document.createElement("img");
     img.alt = `Motion event ${event.detected_at}`;
@@ -143,11 +184,21 @@ function renderEvents(events) {
     download.download = filename;
     download.textContent = "Download JPG";
 
-    actions.append(download);
-    body.append(title, path, badge, actions);
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "danger";
+    removeButton.textContent = "Delete";
+    removeButton.addEventListener("click", () => {
+      void deleteEvents([filename]);
+    });
+
+    actions.append(download, removeButton);
+    body.append(selection, title, path, badge, actions);
     card.append(img, body);
     eventList.append(card);
   }
+
+  updateEventActionButtons();
 }
 
 function renderSnapshot(snapshot) {
@@ -171,6 +222,10 @@ function renderStatus(status) {
   renderCamera(status.camera);
   renderSenseHat(status.sense_hat);
   renderMotion(status.motion);
+  motionPollInterval.disabled = !status.motion;
+  if (status.motion) {
+    motionPollInterval.value = `${status.motion.poll_interval_seconds}`;
+  }
   renderSnapshot(status.snapshot);
   renderEvents(status.motion_events || []);
 }
@@ -193,7 +248,7 @@ async function captureSnapshot() {
   }
 
   renderStatus(payload.status);
-  message.textContent = "Snapshot captured.";
+  message.textContent = `Captured ${payload.captured_count || 1} photo${payload.captured_count === 1 ? "" : "s"}.`;
 }
 
 async function setMotionState(endpoint, successMessage) {
@@ -254,6 +309,126 @@ async function saveNetworkCameraUrl() {
   message.textContent = "ESP32-CAM URL saved.";
 }
 
+async function saveSettings() {
+  const burstCount = Number.parseInt(captureBurstCount.value, 10);
+  if (Number.isNaN(burstCount)) {
+    message.textContent = "Choose a burst count between 1 and 5.";
+    return;
+  }
+
+  const body = {
+    burst_count: burstCount,
+  };
+
+  if (!motionPollInterval.disabled) {
+    const pollInterval = Number.parseFloat(motionPollInterval.value);
+    if (Number.isNaN(pollInterval)) {
+      message.textContent = "Enter a poll interval between 0.5 and 30 seconds.";
+      return;
+    }
+    body.poll_interval_seconds = pollInterval;
+  }
+
+  message.textContent = "Saving settings...";
+  settingsButton.disabled = true;
+  const response = await fetch("/api/settings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  settingsButton.disabled = false;
+
+  if (!response.ok) {
+    message.textContent = payload.error || "Settings update failed.";
+    return;
+  }
+
+  renderStatus(payload.status);
+  message.textContent = "Settings saved.";
+}
+
+function updateEventActionButtons() {
+  const totalEvents = currentEvents.length;
+  const selectedCount = selectedEventFilenames.size;
+  const hasEvents = totalEvents > 0;
+  const hasSelection = selectedCount > 0;
+
+  eventsSelectButton.disabled = !hasEvents;
+  eventsDownloadButton.disabled = !hasSelection;
+  eventsDeleteButton.disabled = !hasSelection;
+  eventsSelectButton.textContent =
+    hasEvents && selectedCount === totalEvents ? "Clear Selection" : "Select All";
+}
+
+async function downloadEvents(filenames) {
+  if (!filenames.length) {
+    message.textContent = "Select at least one event image.";
+    return;
+  }
+
+  message.textContent = "Preparing download...";
+  const response = await fetch("/api/events/download", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ filenames }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json();
+    message.textContent = payload.error || "Download failed.";
+    return;
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const contentDisposition = response.headers.get("Content-Disposition") || "";
+  const match = contentDisposition.match(/filename="?([^"]+)"?/);
+  link.href = url;
+  link.download = match ? match[1] : "motionsense-events.zip";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+  message.textContent = `Downloaded ${filenames.length} photo${filenames.length === 1 ? "" : "s"}.`;
+}
+
+async function deleteEvents(filenames) {
+  if (!filenames.length) {
+    message.textContent = "Select at least one event image.";
+    return;
+  }
+  if (!window.confirm(`Delete ${filenames.length} photo${filenames.length === 1 ? "" : "s"}?`)) {
+    return;
+  }
+
+  message.textContent = "Deleting event photos...";
+  const response = await fetch("/api/events/delete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ filenames }),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    message.textContent = payload.error || "Delete failed.";
+    return;
+  }
+
+  for (const filename of filenames) {
+    selectedEventFilenames.delete(filename);
+  }
+  renderStatus(payload.status);
+  message.textContent = `Deleted ${payload.deleted_count} photo${payload.deleted_count === 1 ? "" : "s"}.`;
+}
+
 captureButton.addEventListener("click", () => {
   void captureSnapshot();
 });
@@ -268,6 +443,32 @@ cameraSourceButton.addEventListener("click", () => {
 
 networkCameraButton.addEventListener("click", () => {
   void saveNetworkCameraUrl();
+});
+
+settingsButton.addEventListener("click", () => {
+  void saveSettings();
+});
+
+eventsSelectButton.addEventListener("click", () => {
+  if (selectedEventFilenames.size === currentEvents.length) {
+    selectedEventFilenames.clear();
+  } else {
+    for (const event of currentEvents) {
+      const filename = event.snapshot_url.split("/").pop();
+      if (filename) {
+        selectedEventFilenames.add(filename);
+      }
+    }
+  }
+  renderEvents(currentEvents);
+});
+
+eventsDownloadButton.addEventListener("click", () => {
+  void downloadEvents(Array.from(selectedEventFilenames));
+});
+
+eventsDeleteButton.addEventListener("click", () => {
+  void deleteEvents(Array.from(selectedEventFilenames));
 });
 
 motionStartButton.addEventListener("click", () => {

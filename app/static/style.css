@@ -75,6 +75,27 @@ button {
   font-weight: 600;
 }
 
+.danger {
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  background: #334155;
+  color: #f8fafc;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.button-link.secondary {
+  padding: 0.65rem 0.9rem;
+}
+
 select {
   border: 0;
   border-radius: 10px;
@@ -96,6 +117,13 @@ input {
 button.primary {
   background: #0ea5e9;
   color: #082f49;
+}
+
+.button-link:hover,
+.button-link:focus,
+button:hover,
+button:focus {
+  filter: brightness(1.08);
 }
 
 .card-header,
@@ -181,6 +209,14 @@ dd {
   color: #94a3b8;
 }
 
+.settings-actions > input {
+  min-width: 120px;
+}
+
+.settings-actions > select {
+  min-width: 130px;
+}
+
 .event-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -215,6 +251,20 @@ dd {
   margin-bottom: 0.75rem;
 }
 
+.event-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+  color: #cbd5e1;
+  font-size: 0.95rem;
+}
+
+.event-select input {
+  min-width: auto;
+  margin: 0;
+}
+
 .badge {
   display: inline-block;
   margin-top: 0.35rem;
@@ -227,6 +277,9 @@ dd {
 
 .event-card-actions {
   margin-top: 0.85rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .event-download {
@@ -244,6 +297,14 @@ dd {
 .event-download:hover,
 .event-download:focus {
   background: #38bdf8;
+}
+
+.page-nav {
+  margin-bottom: 1rem;
+}
+
+.archive-meta {
+  margin-bottom: 1rem;
 }
 
 @media (max-width: 720px) {

@@ -1,4 +1,5 @@
 import unittest
+from zipfile import ZipFile
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -26,6 +27,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("motion", payload)
         self.assertIn("motion_events", payload)
         self.assertIn("network_camera_url", payload["camera"])
+        self.assertIn("burst_count", payload["camera"])
 
     def test_network_camera_endpoint_accepts_url(self):
         app = create_app(start_detector=False)
@@ -36,6 +38,63 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
+
+    def test_settings_endpoint_updates_poll_interval_and_burst_count(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/settings",
+            json={"poll_interval_seconds": 5.5, "burst_count": 3},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"]["motion"]["poll_interval_seconds"], 5.5)
+        self.assertEqual(payload["status"]["camera"]["burst_count"], 3)
+
+    def test_delete_events_endpoint_returns_updated_payload(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        with patch(
+            "app.monitor.MonitorService.delete_events",
+            return_value={
+                "deleted_count": 1,
+                "deleted_filenames": ["20260416T201700000000Z.jpg"],
+                "events": [],
+                "status": {"motion_events": []},
+            },
+        ):
+            response = client.post(
+                "/api/events/delete",
+                json={"filenames": ["20260416T201700000000Z.jpg"]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["deleted_count"], 1)
+
+    def test_events_download_endpoint_returns_zip_bundle(self):
+        with TemporaryDirectory() as temp_dir:
+            event_path = Path(temp_dir) / "20260416T201700000000Z.jpg"
+            Image.new("RGB", (320, 240), color="purple").save(event_path, format="JPEG")
+
+            app = create_app(start_detector=False)
+            client = app.test_client()
+
+            with patch("app.monitor.MonitorService.selected_event_paths", return_value=[event_path]):
+                response = client.post(
+                    "/api/events/download",
+                    json={"filenames": [event_path.name]},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/zip")
+        with ZipFile(BytesIO(response.data)) as archive:
+            self.assertEqual(archive.namelist(), [event_path.name])
 
     def test_snapshot_endpoint_can_return_scaled_preview(self):
         with TemporaryDirectory() as temp_dir:
@@ -77,6 +136,30 @@ class WebTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 200)
             capture_snapshot.assert_called_once_with()
+
+    def test_archive_page_renders_saved_event_downloads(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        archived_events = [
+            {
+                "event_id": "20260416T201700000000Z",
+                "detected_at": "2026-04-16T20:17:00+00:00",
+                "score": None,
+                "snapshot_path": "/opt/motionsense-pi/data/events/20260416T201700000000Z.jpg",
+                "snapshot_url": "/events/20260416T201700000000Z.jpg",
+                "size_bytes": 1024,
+            }
+        ]
+
+        with patch("app.monitor.MonitorService.archived_events_payload", return_value=archived_events):
+            response = client.get("/archive")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Event Archive", page)
+        self.assertIn("Download Selected", page)
+        self.assertIn("Delete Selected", page)
 
 
 if __name__ == "__main__":

@@ -65,11 +65,15 @@ Pi Camera / USB Webcam / ESP32-CAM
 The browser dashboard supports:
 
 - manual snapshot capture
+- configurable motion poll interval
+- configurable 1-5 photo burst capture for manual and motion-triggered snapshots
 - camera source selection
 - ESP32-CAM URL storage
 - motion detector arm/pause
 - latest snapshot view
 - recent motion event thumbnails with per-image download buttons
+- per-image and bulk delete/download controls for motion event images
+- a full browser archive page for older saved event images
 - Sense HAT telemetry
 
 ### ESP32-CAM firmware

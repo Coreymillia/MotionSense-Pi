@@ -24,6 +24,7 @@ class FakeCamera:
         self.width = 1280
         self.height = 720
         self.executable = "fake-rpicam-still"
+        self._burst_count = 1
         self._probe_colors = ["black", "white", "white"]
 
     def is_available(self) -> bool:
@@ -53,6 +54,9 @@ class FakeCamera:
         )
         return self.details_for_path(self.snapshot_path)
 
+    def burst_count(self) -> int:
+        return self._burst_count
+
 
 class MotionDetectorTests(unittest.TestCase):
     def test_motion_detector_records_event(self):
@@ -79,6 +83,91 @@ class MotionDetectorTests(unittest.TestCase):
             events = detector.events_payload()
             self.assertEqual(len(events), 1)
             self.assertGreater(events[0]["score"], 5.0)
+
+    def test_archived_events_payload_lists_saved_images(self):
+        with TemporaryDirectory() as temp_dir:
+            event_dir = Path(temp_dir) / "events"
+            event_dir.mkdir(parents=True, exist_ok=True)
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=event_dir,
+            )
+
+            Image.new("RGB", (320, 240), color="red").save(
+                event_dir / "20260416T201500000000Z.jpg", format="JPEG"
+            )
+            Image.new("RGB", (320, 240), color="blue").save(
+                event_dir / "20260416T201700000000Z.jpg", format="JPEG"
+            )
+            Image.new("RGB", (320, 240), color="green").save(
+                event_dir / "_probe.jpg", format="JPEG"
+            )
+
+            events = detector.archived_events_payload()
+
+            self.assertEqual(
+                [event["event_id"] for event in events],
+                ["20260416T201700000000Z", "20260416T201500000000Z"],
+            )
+            self.assertEqual(events[0]["snapshot_url"], "/events/20260416T201700000000Z.jpg")
+            self.assertIsNone(events[0]["score"])
+
+    def test_record_event_captures_burst_count_images(self):
+        with TemporaryDirectory() as temp_dir:
+            camera = FakeCamera(Path(temp_dir) / "latest.jpg")
+            camera._burst_count = 3
+            detector = MotionDetector(
+                camera=camera,
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+            )
+
+            detector._record_event(score=22.0, capture_started=time.monotonic())
+
+            events = detector.archived_events_payload()
+            self.assertEqual(len(events), 3)
+
+    def test_poll_interval_setting_persists(self):
+        with TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "motion_config.json"
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+                config_path=config_path,
+            )
+
+            detector.set_poll_interval_seconds(6.5)
+
+            reloaded = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+                config_path=config_path,
+            )
+            self.assertEqual(reloaded.poll_interval_seconds, 6.5)
+
+    def test_delete_events_removes_selected_files(self):
+        with TemporaryDirectory() as temp_dir:
+            event_dir = Path(temp_dir) / "events"
+            event_dir.mkdir(parents=True, exist_ok=True)
+            first_event = event_dir / "20260416T201500000000Z.jpg"
+            second_event = event_dir / "20260416T201700000000Z.jpg"
+            Image.new("RGB", (320, 240), color="red").save(first_event, format="JPEG")
+            Image.new("RGB", (320, 240), color="blue").save(second_event, format="JPEG")
+
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=event_dir,
+            )
+
+            deleted = detector.delete_events([second_event.name])
+
+            self.assertEqual(deleted, [second_event.name])
+            self.assertFalse(second_event.exists())
+            self.assertTrue(first_event.exists())
 
 
 if __name__ == "__main__":

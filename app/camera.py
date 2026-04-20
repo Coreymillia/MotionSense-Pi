@@ -54,6 +54,7 @@ class CameraService:
         self._selected_source_id: str | None = None
         self._selected_source_name: str | None = None
         self._network_camera_url: str | None = None
+        self._burst_count = 1
         self._source_cache_ttl_seconds = 5.0
         self._source_cache_at = 0.0
         self._source_cache: tuple[CameraSource, ...] | None = None
@@ -80,12 +81,18 @@ class CameraService:
             config.get("network_camera_url")
         )
 
+        try:
+            self._burst_count = self._normalize_burst_count(config.get("burst_count", 1))
+        except RuntimeError:
+            self._burst_count = 1
+
     def _save_config(self) -> None:
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "selected_source_id": self._selected_source_id,
             "selected_source_name": self._selected_source_name,
             "network_camera_url": self._network_camera_url,
+            "burst_count": self._burst_count,
         }
         self._config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -108,6 +115,21 @@ class CameraService:
 
     def network_camera_url(self) -> str | None:
         return self._network_camera_url
+
+    @staticmethod
+    def _normalize_burst_count(value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise RuntimeError("Burst count must be an integer between 1 and 5.")
+        if value < 1 or value > 5:
+            raise RuntimeError("Burst count must be between 1 and 5.")
+        return value
+
+    def burst_count(self) -> int:
+        return self._burst_count
+
+    def set_burst_count(self, value: int) -> None:
+        self._burst_count = self._normalize_burst_count(value)
+        self._save_config()
 
     def set_network_camera_url(self, value: str) -> None:
         normalized = self._normalize_camera_url(value)
@@ -494,6 +516,10 @@ class CameraService:
             width=self.width,
             height=self.height,
         )
+
+    def capture_snapshot_burst(self, count: int | None = None) -> list[SnapshotDetails]:
+        total_count = self._burst_count if count is None else self._normalize_burst_count(count)
+        return [self.capture_snapshot() for _ in range(total_count)]
 
     def capture_probe(
         self,

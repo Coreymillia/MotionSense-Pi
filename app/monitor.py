@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 import socket
 
 from app.camera import CameraService, SnapshotDetails
@@ -41,6 +42,7 @@ class MonitorService:
                 "active_source_name": self.camera.selected_source_name(),
                 "backend": active_source.backend if active_source is not None else None,
                 "network_camera_url": self.camera.network_camera_url(),
+                "burst_count": self.camera.burst_count(),
                 "target": self.camera.active_capture_target(),
                 "sources": self.camera.list_sources(),
                 "resolution": {
@@ -63,14 +65,21 @@ class MonitorService:
         }
 
     def capture_snapshot(self) -> dict[str, object]:
-        snapshot = self.camera.capture_snapshot()
+        snapshots = self.camera.capture_snapshot_burst()
+        snapshot = snapshots[-1]
         self.sense_hat.show_status("capture-ok")
 
         return {
             "ok": True,
+            "captured_count": len(snapshots),
             "snapshot": self._snapshot_payload(snapshot),
             "status": self.status_payload(),
         }
+
+    def archived_events_payload(self, limit: int | None = None) -> list[dict[str, object]]:
+        if self.motion_detector is None:
+            return []
+        return self.motion_detector.archived_events_payload(limit=limit)
 
     def start_motion_detection(self) -> dict[str, object]:
         if self.motion_detector is None:
@@ -96,3 +105,38 @@ class MonitorService:
         self.camera.set_network_camera_url(url)
         self.sense_hat.show_status("idle")
         return self.status_payload()
+
+    def update_capture_settings(
+        self,
+        poll_interval_seconds: float | None = None,
+        burst_count: int | None = None,
+    ) -> dict[str, object]:
+        if poll_interval_seconds is None and burst_count is None:
+            raise RuntimeError("At least one setting is required.")
+
+        if poll_interval_seconds is not None:
+            if self.motion_detector is None:
+                raise RuntimeError("Motion detection is not configured.")
+            self.motion_detector.set_poll_interval_seconds(poll_interval_seconds)
+
+        if burst_count is not None:
+            self.camera.set_burst_count(burst_count)
+
+        return self.status_payload()
+
+    def delete_events(self, filenames: list[str]) -> dict[str, object]:
+        if self.motion_detector is None:
+            raise RuntimeError("Motion detection is not configured.")
+
+        deleted_filenames = self.motion_detector.delete_events(filenames)
+        return {
+            "deleted_count": len(deleted_filenames),
+            "deleted_filenames": deleted_filenames,
+            "events": self.archived_events_payload(),
+            "status": self.status_payload(),
+        }
+
+    def selected_event_paths(self, filenames: list[str]) -> list[Path]:
+        if self.motion_detector is None:
+            raise RuntimeError("Motion detection is not configured.")
+        return self.motion_detector.selected_event_paths(filenames)

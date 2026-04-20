@@ -144,6 +144,26 @@ class CameraServiceTests(unittest.TestCase):
 
         self.assertEqual(extracted, second)
 
+    def test_burst_count_persists_in_camera_config(self):
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "latest.jpg"
+            service = CameraService(snapshot_path=snapshot_path)
+
+            service.set_burst_count(4)
+
+            reloaded = CameraService(snapshot_path=snapshot_path)
+            self.assertEqual(reloaded.burst_count(), 4)
+
+    def test_capture_snapshot_burst_repeats_requested_count(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+
+            with patch.object(service, "capture_snapshot", return_value=service.snapshot_details()) as capture:
+                snapshots = service.capture_snapshot_burst(count=3)
+
+            self.assertEqual(len(snapshots), 3)
+            self.assertEqual(capture.call_count, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
