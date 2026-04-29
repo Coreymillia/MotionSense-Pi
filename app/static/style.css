@@ -332,6 +332,10 @@ dd {
   background: rgba(2, 6, 23, 0.92);
 }
 
+.lightbox.hidden {
+  display: none;
+}
+
 .lightbox-dialog {
   width: min(96vw, 1200px);
   max-height: 96vh;
