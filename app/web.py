@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+import re
 import subprocess
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -13,6 +14,7 @@ from app.camera import CameraService
 from app.monitor import MonitorService
 from app.motion import MotionDetector
 from app.sensehat import SenseHatService
+from app.timed_capture import TimedCaptureService
 
 
 def create_app(start_detector: bool = True) -> Flask:
@@ -31,10 +33,16 @@ def create_app(start_detector: bool = True) -> Flask:
         event_dir=event_dir,
         config_path=data_dir / "motion_config.json",
     )
+    timed_capture = TimedCaptureService(
+        motion_detector=motion_detector,
+        sense_hat=sense_hat,
+        config_path=data_dir / "timer_config.json",
+    )
     monitor = MonitorService(
         camera=camera,
         sense_hat=sense_hat,
         motion_detector=motion_detector,
+        timed_capture=timed_capture,
     )
     if start_detector:
         motion_detector.start()
@@ -111,6 +119,30 @@ def create_app(start_detector: bool = True) -> Flask:
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 500
 
+    @app.post("/api/timer/start")
+    def api_timer_start():
+        payload = request.get_json(silent=True) or {}
+        interval_seconds = payload.get("interval_seconds")
+        if isinstance(interval_seconds, bool) or not isinstance(interval_seconds, (int, float)):
+            return jsonify({"ok": False, "error": "interval_seconds must be a number."}), 400
+
+        try:
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": monitor.start_timed_capture(int(interval_seconds)),
+                }
+            )
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/timer/stop")
+    def api_timer_stop():
+        try:
+            return jsonify({"ok": True, "status": monitor.stop_timed_capture()})
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
     @app.post("/api/camera/source")
     def api_camera_source():
         payload = request.get_json(silent=True) or {}
@@ -141,11 +173,13 @@ def create_app(start_detector: bool = True) -> Flask:
         payload = request.get_json(silent=True) or {}
         has_poll_interval = "poll_interval_seconds" in payload
         has_burst_count = "burst_count" in payload
-        if not has_poll_interval and not has_burst_count:
+        has_resolution = "resolution" in payload
+        if not has_poll_interval and not has_burst_count and not has_resolution:
             return jsonify({"ok": False, "error": "At least one setting is required."}), 400
 
         poll_interval = payload.get("poll_interval_seconds") if has_poll_interval else None
         burst_count = payload.get("burst_count") if has_burst_count else None
+        resolution = payload.get("resolution") if has_resolution else None
 
         if has_poll_interval and (
             isinstance(poll_interval, bool) or not isinstance(poll_interval, (int, float))
@@ -157,6 +191,15 @@ def create_app(start_detector: bool = True) -> Flask:
             isinstance(burst_count, bool) or not isinstance(burst_count, int)
         ):
             return jsonify({"ok": False, "error": "burst_count must be an integer."}), 400
+        if has_resolution and not isinstance(resolution, str):
+            return jsonify({"ok": False, "error": "resolution must be a string like 1280x720."}), 400
+
+        resolution_pair: tuple[int, int] | None = None
+        if has_resolution:
+            match = re.fullmatch(r"\s*(\d+)x(\d+)\s*", resolution or "")
+            if match is None:
+                return jsonify({"ok": False, "error": "resolution must look like 1280x720."}), 400
+            resolution_pair = (int(match.group(1)), int(match.group(2)))
 
         try:
             return jsonify(
@@ -167,6 +210,7 @@ def create_app(start_detector: bool = True) -> Flask:
                         if has_poll_interval
                         else None,
                         burst_count=burst_count if has_burst_count else None,
+                        resolution=resolution_pair,
                     ),
                 }
             )

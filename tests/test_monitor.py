@@ -53,6 +53,30 @@ class FakeMotionDetector:
         self.poll_interval_seconds = value
 
 
+class FakeTimedCapture:
+    def __init__(self) -> None:
+        self.interval_seconds = 60
+        self.armed = False
+
+    def status_payload(self):
+        return {
+            "armed": self.armed,
+            "running": self.armed,
+            "interval_seconds": self.interval_seconds,
+            "last_capture_at": None,
+            "last_error": None,
+            "capture_count": 0,
+        }
+
+    def start(self, interval_seconds: int | None = None) -> None:
+        if interval_seconds is not None:
+            self.interval_seconds = interval_seconds
+        self.armed = True
+
+    def stop(self) -> None:
+        self.armed = False
+
+
 class MonitorServiceTests(unittest.TestCase):
     def test_status_payload_reports_missing_snapshot(self):
         with TemporaryDirectory() as temp_dir:
@@ -61,6 +85,7 @@ class MonitorServiceTests(unittest.TestCase):
                 camera=camera,
                 sense_hat=FakeSenseHat(),
                 motion_detector=FakeMotionDetector(),
+                timed_capture=FakeTimedCapture(),
             )
 
             payload = monitor.status_payload()
@@ -69,7 +94,9 @@ class MonitorServiceTests(unittest.TestCase):
             self.assertFalse(payload["snapshot"]["exists"])
             self.assertTrue(payload["sense_hat"]["available"])
             self.assertTrue(payload["motion"]["armed"])
+            self.assertFalse(payload["timer"]["armed"])
             self.assertEqual(payload["camera"]["burst_count"], 1)
+            self.assertIn("options", payload["camera"]["resolution"])
             self.assertEqual(len(payload["motion_events"]), 1)
 
     def test_set_camera_source_refreshes_snapshot(self):
@@ -102,6 +129,7 @@ class MonitorServiceTests(unittest.TestCase):
             camera=camera,
             sense_hat=sense_hat,
             motion_detector=FakeMotionDetector(),
+            timed_capture=FakeTimedCapture(),
         )
 
         payload = monitor.set_camera_source("usb-video1")
@@ -116,6 +144,14 @@ class MonitorServiceTests(unittest.TestCase):
         camera = Mock()
         camera.set_burst_count = Mock()
         camera.burst_count = Mock(return_value=3)
+        camera.set_resolution = Mock()
+        camera.resolution_payload = Mock(
+            return_value={
+                "width": 1280,
+                "height": 720,
+                "options": [{"width": 1280, "height": 720, "label": "1280 x 720"}],
+            }
+        )
         camera.snapshot_details = Mock(
             return_value=SnapshotDetails(
                 exists=False,
@@ -139,6 +175,7 @@ class MonitorServiceTests(unittest.TestCase):
             camera=camera,
             sense_hat=FakeSenseHat(),
             motion_detector=motion_detector,
+            timed_capture=FakeTimedCapture(),
         )
 
         payload = monitor.update_capture_settings(poll_interval_seconds=5.0, burst_count=3)
@@ -147,6 +184,48 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertEqual(payload["camera"]["burst_count"], 3)
         self.assertEqual(payload["motion"]["poll_interval_seconds"], 5.0)
 
+    def test_update_capture_settings_updates_resolution(self):
+        camera = Mock()
+        camera.set_burst_count = Mock()
+        camera.set_resolution = Mock()
+        camera.burst_count = Mock(return_value=1)
+        camera.resolution_payload = Mock(
+            return_value={
+                "width": 3280,
+                "height": 2464,
+                "options": [{"width": 3280, "height": 2464, "label": "3280 x 2464 (Max)"}],
+            }
+        )
+        camera.snapshot_details = Mock(
+            return_value=SnapshotDetails(
+                exists=False,
+                path="/tmp/latest.jpg",
+                modified_at=None,
+                size_bytes=None,
+            )
+        )
+        camera.active_source = Mock(return_value=None)
+        camera.is_available = Mock(return_value=True)
+        camera.selected_source_id = Mock(return_value="pi-camera")
+        camera.selected_source_name = Mock(return_value="Pi Camera")
+        camera.network_camera_url = Mock(return_value=None)
+        camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
+        camera.list_sources = Mock(return_value=[])
+        camera.width = 3280
+        camera.height = 2464
+
+        monitor = MonitorService(
+            camera=camera,
+            sense_hat=FakeSenseHat(),
+            motion_detector=FakeMotionDetector(),
+            timed_capture=FakeTimedCapture(),
+        )
+
+        payload = monitor.update_capture_settings(resolution=(3280, 2464))
+
+        camera.set_resolution.assert_called_once_with(3280, 2464)
+        self.assertEqual(payload["camera"]["resolution"]["width"], 3280)
+
     def test_archived_events_payload_passes_through_to_motion_detector(self):
         with TemporaryDirectory() as temp_dir:
             camera = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
@@ -154,12 +233,49 @@ class MonitorServiceTests(unittest.TestCase):
                 camera=camera,
                 sense_hat=FakeSenseHat(),
                 motion_detector=FakeMotionDetector(),
+                timed_capture=FakeTimedCapture(),
             )
 
             payload = monitor.archived_events_payload(limit=25)
 
             self.assertEqual(payload[0]["event_id"], "evt-archive")
             self.assertEqual(payload[0]["limit"], 25)
+
+    def test_start_and_stop_timed_capture_updates_status(self):
+        camera = Mock()
+        camera.snapshot_details = Mock(
+            return_value=SnapshotDetails(
+                exists=False,
+                path="/tmp/latest.jpg",
+                modified_at=None,
+                size_bytes=None,
+            )
+        )
+        camera.active_source = Mock(return_value=None)
+        camera.is_available = Mock(return_value=True)
+        camera.selected_source_id = Mock(return_value="pi-camera")
+        camera.selected_source_name = Mock(return_value="Pi Camera")
+        camera.network_camera_url = Mock(return_value=None)
+        camera.burst_count = Mock(return_value=1)
+        camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
+        camera.list_sources = Mock(return_value=[])
+        camera.width = 1280
+        camera.height = 720
+
+        timed_capture = FakeTimedCapture()
+        monitor = MonitorService(
+            camera=camera,
+            sense_hat=FakeSenseHat(),
+            motion_detector=FakeMotionDetector(),
+            timed_capture=timed_capture,
+        )
+
+        started = monitor.start_timed_capture(120)
+        self.assertTrue(started["timer"]["armed"])
+        self.assertEqual(started["timer"]["interval_seconds"], 120)
+
+        stopped = monitor.stop_timed_capture()
+        self.assertFalse(stopped["timer"]["armed"])
 
 
 if __name__ == "__main__":

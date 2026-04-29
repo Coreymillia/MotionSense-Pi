@@ -111,6 +111,7 @@ class MotionDetectorTests(unittest.TestCase):
                 ["20260416T201700000000Z", "20260416T201500000000Z"],
             )
             self.assertEqual(events[0]["snapshot_url"], "/events/20260416T201700000000Z.jpg")
+            self.assertEqual(events[0]["source"], "motion")
             self.assertIsNone(events[0]["score"])
 
     def test_record_event_captures_burst_count_images(self):
@@ -127,6 +128,21 @@ class MotionDetectorTests(unittest.TestCase):
 
             events = detector.archived_events_payload()
             self.assertEqual(len(events), 3)
+
+    def test_record_external_capture_saves_timer_event(self):
+        with TemporaryDirectory() as temp_dir:
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+            )
+
+            events = detector.record_external_capture(source="timer")
+
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].source, "timer")
+            archived = detector.archived_events_payload()
+            self.assertEqual(archived[0]["source"], "timer")
 
     def test_poll_interval_setting_persists(self):
         with TemporaryDirectory() as temp_dir:

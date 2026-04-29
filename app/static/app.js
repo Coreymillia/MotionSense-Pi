@@ -6,9 +6,14 @@ const cameraSourceSelect = document.getElementById("camera-source-select");
 const cameraSourceButton = document.getElementById("camera-source-button");
 const networkCameraUrl = document.getElementById("network-camera-url");
 const networkCameraButton = document.getElementById("network-camera-button");
+const captureResolution = document.getElementById("capture-resolution");
 const motionPollInterval = document.getElementById("motion-poll-interval");
 const captureBurstCount = document.getElementById("capture-burst-count");
 const settingsButton = document.getElementById("settings-button");
+const timerIntervalValue = document.getElementById("timer-interval-value");
+const timerIntervalUnit = document.getElementById("timer-interval-unit");
+const timerStartButton = document.getElementById("timer-start-button");
+const timerStopButton = document.getElementById("timer-stop-button");
 const motionStartButton = document.getElementById("motion-start-button");
 const motionStopButton = document.getElementById("motion-stop-button");
 const message = document.getElementById("message");
@@ -16,6 +21,7 @@ const snapshotImage = document.getElementById("snapshot-image");
 const snapshotEmpty = document.getElementById("snapshot-empty");
 const snapshotMeta = document.getElementById("snapshot-meta");
 const senseHatPanel = document.getElementById("sensehat-panel");
+const timerPanel = document.getElementById("timer-panel");
 const motionPanel = document.getElementById("motion-panel");
 const eventList = document.getElementById("event-list");
 const eventsSelectButton = document.getElementById("events-select-button");
@@ -74,6 +80,15 @@ function renderCamera(data) {
   cameraSourceButton.disabled = cameraSourceSelect.disabled;
   networkCameraUrl.value = data.network_camera_url || "";
   captureBurstCount.value = `${data.burst_count || 1}`;
+  captureResolution.innerHTML = "";
+  for (const option of data.resolution.options || []) {
+    const selectOption = document.createElement("option");
+    selectOption.value = `${option.width}x${option.height}`;
+    selectOption.textContent = option.label;
+    selectOption.selected =
+      option.width === data.resolution.width && option.height === data.resolution.height;
+    captureResolution.append(selectOption);
+  }
 }
 
 function renderMotion(data) {
@@ -107,6 +122,43 @@ function renderMotion(data) {
 
   motionStartButton.disabled = data.armed;
   motionStopButton.disabled = !data.armed;
+}
+
+function timerInputsFromSeconds(intervalSeconds) {
+  if (intervalSeconds >= 60 && intervalSeconds % 60 === 0) {
+    return {
+      value: intervalSeconds / 60,
+      unit: "minutes",
+    };
+  }
+  return {
+    value: intervalSeconds,
+    unit: "seconds",
+  };
+}
+
+function renderTimer(data) {
+  timerPanel.innerHTML = "";
+
+  if (!data) {
+    addDefinitionRow(timerPanel, "Available", "No");
+    timerStartButton.disabled = true;
+    timerStopButton.disabled = true;
+    return;
+  }
+
+  addDefinitionRow(timerPanel, "Armed", data.armed ? "Yes" : "No");
+  addDefinitionRow(timerPanel, "Running", data.running ? "Yes" : "No");
+  addDefinitionRow(timerPanel, "Interval", `${data.interval_seconds}s`);
+  addDefinitionRow(timerPanel, "Captured", `${data.capture_count}`);
+  addDefinitionRow(timerPanel, "Last Capture", data.last_capture_at || "None yet");
+  addDefinitionRow(timerPanel, "Timer Error", data.last_error || "None");
+
+  const timerInputs = timerInputsFromSeconds(data.interval_seconds);
+  timerIntervalValue.value = `${timerInputs.value}`;
+  timerIntervalUnit.value = timerInputs.unit;
+  timerStartButton.disabled = data.armed;
+  timerStopButton.disabled = !data.armed;
 }
 
 function renderEvents(events) {
@@ -173,7 +225,10 @@ function renderEvents(events) {
 
     const badge = document.createElement("span");
     badge.className = "badge";
-    badge.textContent = `Score ${event.score}`;
+    badge.textContent =
+      event.score === null
+        ? `${event.source === "timer" ? "Timed" : "Saved"} capture`
+        : `Score ${event.score}`;
 
     const actions = document.createElement("div");
     actions.className = "event-card-actions";
@@ -221,6 +276,7 @@ function renderStatus(status) {
   document.getElementById("generated-at").textContent = status.generated_at;
   renderCamera(status.camera);
   renderSenseHat(status.sense_hat);
+  renderTimer(status.timer);
   renderMotion(status.motion);
   motionPollInterval.disabled = !status.motion;
   if (status.motion) {
@@ -318,6 +374,7 @@ async function saveSettings() {
 
   const body = {
     burst_count: burstCount,
+    resolution: captureResolution.value,
   };
 
   if (!motionPollInterval.disabled) {
@@ -348,6 +405,55 @@ async function saveSettings() {
 
   renderStatus(payload.status);
   message.textContent = "Settings saved.";
+}
+
+async function startTimer() {
+  const intervalValue = Number.parseInt(timerIntervalValue.value, 10);
+  if (Number.isNaN(intervalValue) || intervalValue < 1) {
+    message.textContent = "Enter a timer interval of at least 1.";
+    return;
+  }
+
+  const intervalSeconds =
+    timerIntervalUnit.value === "minutes"
+      ? intervalValue * 60
+      : intervalValue;
+
+  message.textContent = "Starting timed capture...";
+  timerStartButton.disabled = true;
+  const response = await fetch("/api/timer/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ interval_seconds: intervalSeconds }),
+  });
+  const payload = await response.json();
+  timerStartButton.disabled = false;
+
+  if (!response.ok) {
+    message.textContent = payload.error || "Timed capture failed to start.";
+    return;
+  }
+
+  renderStatus(payload.status);
+  message.textContent = "Timed capture started.";
+}
+
+async function stopTimer() {
+  message.textContent = "Stopping timed capture...";
+  timerStopButton.disabled = true;
+  const response = await fetch("/api/timer/stop", { method: "POST" });
+  const payload = await response.json();
+  timerStopButton.disabled = false;
+
+  if (!response.ok) {
+    message.textContent = payload.error || "Timed capture failed to stop.";
+    return;
+  }
+
+  renderStatus(payload.status);
+  message.textContent = "Timed capture stopped.";
 }
 
 function updateEventActionButtons() {
@@ -431,6 +537,12 @@ async function deleteEvents(filenames) {
 
 captureButton.addEventListener("click", () => {
   void captureSnapshot();
+});
+timerStartButton.addEventListener("click", () => {
+  void startTimer();
+});
+timerStopButton.addEventListener("click", () => {
+  void stopTimer();
 });
 
 refreshButton.addEventListener("click", () => {

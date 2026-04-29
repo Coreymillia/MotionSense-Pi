@@ -66,6 +66,16 @@
           <div class="camera-config">
             <label for="motion-poll-interval">Capture Settings</label>
             <div class="actions compact settings-actions">
+              <select id="capture-resolution">
+                {% for option in status.camera.resolution.options %}
+                  <option
+                    value="{{ option.width }}x{{ option.height }}"
+                    {% if option.width == status.camera.resolution.width and option.height == status.camera.resolution.height %}selected{% endif %}
+                  >
+                    {{ option.label }}
+                  </option>
+                {% endfor %}
+              </select>
               <input
                 id="motion-poll-interval"
                 type="number"
@@ -92,6 +102,33 @@
         <article class="card">
           <h2>Sense HAT</h2>
           <dl id="sensehat-panel"></dl>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>Timed Capture</h2>
+            <div class="actions compact">
+              <button id="timer-start-button">Start Timer</button>
+              <button id="timer-stop-button">Stop Timer</button>
+            </div>
+          </div>
+          <div class="camera-config">
+            <label for="timer-interval-value">Capture Interval</label>
+            <div class="actions compact settings-actions">
+              <input
+                id="timer-interval-value"
+                type="number"
+                min="1"
+                step="1"
+                value="60"
+              >
+              <select id="timer-interval-unit">
+                <option value="seconds">Seconds</option>
+                <option value="minutes">Minutes</option>
+              </select>
+            </div>
+          </div>
+          <dl id="timer-panel"></dl>
         </article>
 
         <article class="card">
@@ -151,7 +188,7 @@
         <div class="card-header">
           <div>
             <h2>Motion Events</h2>
-            <p class="subtle">Recent motion-triggered captures appear here.</p>
+            <p class="subtle">Recent motion and timed captures appear here.</p>
           </div>
           <div class="actions compact">
             <button id="events-select-button" type="button">Select All</button>

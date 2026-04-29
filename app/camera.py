@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import threading
@@ -35,6 +36,13 @@ class CameraSource:
     base_url: str | None = None
 
 
+@dataclass(frozen=True)
+class ResolutionOption:
+    width: int
+    height: int
+    label: str
+
+
 class CameraService:
     def __init__(
         self,
@@ -55,6 +63,7 @@ class CameraService:
         self._selected_source_name: str | None = None
         self._network_camera_url: str | None = None
         self._burst_count = 1
+        self._resolution_options: tuple[ResolutionOption, ...] | None = None
         self._source_cache_ttl_seconds = 5.0
         self._source_cache_at = 0.0
         self._source_cache: tuple[CameraSource, ...] | None = None
@@ -86,6 +95,15 @@ class CameraService:
         except RuntimeError:
             self._burst_count = 1
 
+        try:
+            self.width, self.height = self._normalize_resolution(
+                config.get("width", self.width),
+                config.get("height", self.height),
+                options=self.resolution_options(),
+            )
+        except RuntimeError:
+            self.width, self.height = 1280, 720
+
     def _save_config(self) -> None:
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -93,6 +111,8 @@ class CameraService:
             "selected_source_name": self._selected_source_name,
             "network_camera_url": self._network_camera_url,
             "burst_count": self._burst_count,
+            "width": self.width,
+            "height": self.height,
         }
         self._config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -129,6 +149,100 @@ class CameraService:
 
     def set_burst_count(self, value: int) -> None:
         self._burst_count = self._normalize_burst_count(value)
+        self._save_config()
+
+    @staticmethod
+    def _resolution_key(width: int, height: int) -> tuple[int, int]:
+        return (width, height)
+
+    @staticmethod
+    def _option_label(width: int, height: int, max_resolution: tuple[int, int]) -> str:
+        label = f"{width} x {height}"
+        if (width, height) == max_resolution:
+            return f"{label} (Max)"
+        return label
+
+    def _default_resolution_pairs(self) -> list[tuple[int, int]]:
+        return [
+            (640, 480),
+            (1280, 720),
+            (1640, 1232),
+            (1920, 1080),
+            (3280, 2464),
+        ]
+
+    def _probe_resolution_pairs(self) -> list[tuple[int, int]]:
+        if self.rpicam_executable is None:
+            return []
+
+        try:
+            output = subprocess.run(
+                [self.rpicam_executable, "--list-cameras"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+        except (subprocess.SubprocessError, OSError):
+            return []
+
+        matches = re.findall(r"(\d+)x(\d+)", output)
+        if not matches:
+            return []
+
+        resolutions = {
+            self._resolution_key(int(width), int(height))
+            for width, height in matches
+        }
+        return sorted(resolutions, key=lambda item: (item[0] * item[1], item[0], item[1]))
+
+    def resolution_options(self) -> list[ResolutionOption]:
+        if self._resolution_options is not None:
+            return list(self._resolution_options)
+
+        pairs = set(self._default_resolution_pairs())
+        pairs.update(self._probe_resolution_pairs())
+        pairs.add(self._resolution_key(self.width, self.height))
+
+        sorted_pairs = sorted(pairs, key=lambda item: (item[0] * item[1], item[0], item[1]))
+        max_resolution = max(sorted_pairs, key=lambda item: item[0] * item[1])
+        self._resolution_options = tuple(
+            ResolutionOption(
+                width=width,
+                height=height,
+                label=self._option_label(width, height, max_resolution),
+            )
+            for width, height in sorted_pairs
+        )
+        return list(self._resolution_options)
+
+    @classmethod
+    def _normalize_resolution(
+        cls,
+        width: object,
+        height: object,
+        options: list[ResolutionOption],
+    ) -> tuple[int, int]:
+        if (
+            isinstance(width, bool)
+            or not isinstance(width, int)
+            or isinstance(height, bool)
+            or not isinstance(height, int)
+        ):
+            raise RuntimeError("Resolution must match a supported width and height.")
+
+        requested = cls._resolution_key(width, height)
+        valid_options = {cls._resolution_key(option.width, option.height) for option in options}
+        if requested not in valid_options:
+            raise RuntimeError("Resolution must be one of the supported camera modes.")
+        return requested
+
+    def set_resolution(self, width: int, height: int) -> None:
+        self.width, self.height = self._normalize_resolution(
+            width,
+            height,
+            options=self.resolution_options(),
+        )
         self._save_config()
 
     def set_network_camera_url(self, value: str) -> None:
@@ -347,6 +461,13 @@ class CameraService:
     def is_available(self, refresh: bool = False) -> bool:
         source = self.active_source(refresh=refresh)
         return source is not None and source.available
+
+    def resolution_payload(self) -> dict[str, Any]:
+        return {
+            "width": self.width,
+            "height": self.height,
+            "options": [asdict(option) for option in self.resolution_options()],
+        }
 
     def latest_snapshot_path(self) -> Path | None:
         if self.snapshot_path.exists():

@@ -12,6 +12,7 @@ It started as a custom build inspired by the product direction of motionEye, but
   - a USB webcam with `v4l2-ctl`
   - an ESP32-CAM over HTTP
 - lets you switch camera sources from the browser UI and CYD
+- can run timed interval captures for stop-motion-style snapshots
 - stores the latest snapshot plus recent motion-triggered events
 - runs lightweight frame-difference motion detection on the Pi
 - reads Sense HAT telemetry and shows:
@@ -65,13 +66,15 @@ Pi Camera / USB Webcam / ESP32-CAM
 The browser dashboard supports:
 
 - manual snapshot capture
+- timed capture start/stop with second or minute intervals
 - configurable motion poll interval
 - configurable 1-5 photo burst capture for manual and motion-triggered snapshots
+- selectable capture resolution from safe preset camera modes
 - camera source selection
 - ESP32-CAM URL storage
 - motion detector arm/pause
 - latest snapshot view
-- recent motion event thumbnails with per-image download buttons
+- recent motion and timed-capture thumbnails with per-image download buttons
 - per-image and bulk delete/download controls for motion event images
 - a full browser archive page for older saved event images
 - Sense HAT telemetry
@@ -107,6 +110,8 @@ Key endpoints used by the browser UI and CYD:
 
 - `GET /api/status`
 - `POST /api/capture`
+- `POST /api/timer/start`
+- `POST /api/timer/stop`
 - `POST /api/motion/start`
 - `POST /api/motion/stop`
 - `POST /api/camera/source`

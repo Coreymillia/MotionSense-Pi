@@ -1,7 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import URLError
 
 from app.camera import CameraService, CameraSource
@@ -163,6 +163,34 @@ class CameraServiceTests(unittest.TestCase):
 
             self.assertEqual(len(snapshots), 3)
             self.assertEqual(capture.call_count, 3)
+
+    def test_resolution_persists_in_camera_config(self):
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "latest.jpg"
+            service = CameraService(snapshot_path=snapshot_path)
+            service._resolution_options = (
+                Mock(width=640, height=480, label="640 x 480"),
+                Mock(width=1280, height=720, label="1280 x 720"),
+                Mock(width=3280, height=2464, label="3280 x 2464 (Max)"),
+            )
+
+            service.set_resolution(3280, 2464)
+
+            reloaded = CameraService(snapshot_path=snapshot_path)
+            reloaded._resolution_options = service._resolution_options
+            reloaded._load_config()
+            self.assertEqual((reloaded.width, reloaded.height), (3280, 2464))
+
+    def test_resolution_options_include_current_resolution(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service.width = 2000
+            service.height = 1500
+
+            with patch.object(service, "_probe_resolution_pairs", return_value=[(640, 480), (3280, 2464)]):
+                options = service.resolution_options()
+
+            self.assertIn((2000, 1500), {(option.width, option.height) for option in options})
 
 
 if __name__ == "__main__":

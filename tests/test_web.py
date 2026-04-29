@@ -25,9 +25,11 @@ class WebTests(unittest.TestCase):
         self.assertIn("sense_hat", payload)
         self.assertIn("snapshot", payload)
         self.assertIn("motion", payload)
+        self.assertIn("timer", payload)
         self.assertIn("motion_events", payload)
         self.assertIn("network_camera_url", payload["camera"])
         self.assertIn("burst_count", payload["camera"])
+        self.assertIn("options", payload["camera"]["resolution"])
 
     def test_network_camera_endpoint_accepts_url(self):
         app = create_app(start_detector=False)
@@ -53,6 +55,37 @@ class WebTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["status"]["motion"]["poll_interval_seconds"], 5.5)
         self.assertEqual(payload["status"]["camera"]["burst_count"], 3)
+
+    def test_settings_endpoint_updates_resolution(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/settings",
+            json={"resolution": "3280x2464"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"]["camera"]["resolution"]["width"], 3280)
+        self.assertEqual(payload["status"]["camera"]["resolution"]["height"], 2464)
+
+    def test_timer_start_endpoint_updates_interval(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        response = client.post("/api/timer/start", json={"interval_seconds": 120})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"]["timer"]["interval_seconds"], 120)
+        self.assertTrue(payload["status"]["timer"]["armed"])
+
+        stop_response = client.post("/api/timer/stop")
+        self.assertEqual(stop_response.status_code, 200)
+        self.assertFalse(stop_response.get_json()["status"]["timer"]["armed"])
 
     def test_delete_events_endpoint_returns_updated_payload(self):
         app = create_app(start_detector=False)

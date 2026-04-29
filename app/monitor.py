@@ -7,6 +7,7 @@ import socket
 from app.camera import CameraService, SnapshotDetails
 from app.motion import MotionDetector
 from app.sensehat import SenseHatService
+from app.timed_capture import TimedCaptureService
 
 
 class MonitorService:
@@ -15,10 +16,12 @@ class MonitorService:
         camera: CameraService,
         sense_hat: SenseHatService,
         motion_detector: MotionDetector | None = None,
+        timed_capture: TimedCaptureService | None = None,
     ) -> None:
         self.camera = camera
         self.sense_hat = sense_hat
         self.motion_detector = motion_detector
+        self.timed_capture = timed_capture
 
     def _snapshot_payload(self, snapshot: SnapshotDetails) -> dict[str, object]:
         return {
@@ -45,13 +48,15 @@ class MonitorService:
                 "burst_count": self.camera.burst_count(),
                 "target": self.camera.active_capture_target(),
                 "sources": self.camera.list_sources(),
-                "resolution": {
-                    "width": self.camera.width,
-                    "height": self.camera.height,
-                },
+                "resolution": self.camera.resolution_payload(),
             },
             "snapshot": self._snapshot_payload(snapshot),
             "sense_hat": self.sense_hat.read(),
+            "timer": (
+                self.timed_capture.status_payload()
+                if self.timed_capture is not None
+                else None
+            ),
             "motion": (
                 self.motion_detector.status_payload()
                 if self.motion_detector is not None
@@ -110,8 +115,9 @@ class MonitorService:
         self,
         poll_interval_seconds: float | None = None,
         burst_count: int | None = None,
+        resolution: tuple[int, int] | None = None,
     ) -> dict[str, object]:
-        if poll_interval_seconds is None and burst_count is None:
+        if poll_interval_seconds is None and burst_count is None and resolution is None:
             raise RuntimeError("At least one setting is required.")
 
         if poll_interval_seconds is not None:
@@ -122,6 +128,21 @@ class MonitorService:
         if burst_count is not None:
             self.camera.set_burst_count(burst_count)
 
+        if resolution is not None:
+            self.camera.set_resolution(*resolution)
+
+        return self.status_payload()
+
+    def start_timed_capture(self, interval_seconds: int) -> dict[str, object]:
+        if self.timed_capture is None:
+            raise RuntimeError("Timed capture is not configured.")
+        self.timed_capture.start(interval_seconds=interval_seconds)
+        return self.status_payload()
+
+    def stop_timed_capture(self) -> dict[str, object]:
+        if self.timed_capture is None:
+            raise RuntimeError("Timed capture is not configured.")
+        self.timed_capture.stop()
         return self.status_payload()
 
     def delete_events(self, filenames: list[str]) -> dict[str, object]:

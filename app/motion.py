@@ -20,6 +20,7 @@ from app.sensehat import SenseHatService
 class MotionEventRecord:
     event_id: str
     detected_at: str
+    source: str
     score: float | None
     snapshot_path: str
     snapshot_url: str
@@ -177,6 +178,7 @@ class MotionDetector:
         deleted_filenames: list[str] = []
         for event_path in event_paths:
             event_path.unlink()
+            self._metadata_path_for_event(event_path).unlink(missing_ok=True)
             deleted_filenames.append(event_path.name)
 
         deleted_names = set(deleted_filenames)
@@ -201,6 +203,36 @@ class MotionDetector:
             return None
         return candidate
 
+    def _metadata_path_for_event(self, path: Path) -> Path:
+        return path.with_suffix(".json")
+
+    def _write_event_metadata(
+        self,
+        path: Path,
+        detected_at: str | None,
+        source: str,
+        score: float | None,
+    ) -> None:
+        payload = {
+            "detected_at": detected_at,
+            "source": source,
+            "score": round(score, 2) if score is not None else None,
+        }
+        self._metadata_path_for_event(path).write_text(
+            json.dumps(payload, indent=2),
+            encoding="utf-8",
+        )
+
+    def _load_event_metadata(self, path: Path) -> dict[str, Any]:
+        metadata_path = self._metadata_path_for_event(path)
+        if not metadata_path.exists():
+            return {}
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
     def _detected_at_for_path(self, path: Path) -> str:
         try:
             detected_at = datetime.strptime(path.stem, "%Y%m%dT%H%M%S%fZ").replace(
@@ -210,15 +242,78 @@ class MotionDetector:
             detected_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
         return detected_at.isoformat()
 
-    def _event_record_for_path(self, path: Path, score: float | None = None) -> MotionEventRecord:
+    def _event_record_for_path(
+        self,
+        path: Path,
+        score: float | None = None,
+        source: str = "motion",
+    ) -> MotionEventRecord:
+        metadata = self._load_event_metadata(path)
+        detected_at = metadata.get("detected_at")
+        if not isinstance(detected_at, str) or not detected_at:
+            detected_at = self._detected_at_for_path(path)
+
+        metadata_source = metadata.get("source")
+        if isinstance(metadata_source, str) and metadata_source:
+            source = metadata_source
+
+        metadata_score = metadata.get("score")
+        if isinstance(metadata_score, (int, float)) and not isinstance(metadata_score, bool):
+            score = float(metadata_score)
+
         return MotionEventRecord(
             event_id=path.stem,
-            detected_at=self._detected_at_for_path(path),
+            detected_at=detected_at,
+            source=source,
             score=round(score, 2) if score is not None else None,
             snapshot_path=str(path),
             snapshot_url=f"/events/{path.name}",
             size_bytes=path.stat().st_size,
         )
+
+    def _capture_event_snapshots(
+        self,
+        count: int,
+        score: float | None = None,
+        source: str = "motion",
+    ) -> tuple[list[MotionEventRecord], str | None]:
+        events: list[MotionEventRecord] = []
+        detected_at: str | None = None
+        for _ in range(max(count, 1)):
+            snapshot = self.camera.capture_snapshot()
+            detected_at = snapshot.modified_at or datetime.now(tz=timezone.utc).isoformat()
+            event_id = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            event_path = self.event_dir / f"{event_id}.jpg"
+            shutil.copy2(self.camera.snapshot_path, event_path)
+            self._write_event_metadata(event_path, detected_at, source, score)
+            event_details = self.camera.details_for_path(event_path)
+
+            event = self._event_record_for_path(event_path, score=score, source=source)
+            events.append(
+                MotionEventRecord(
+                    event_id=event.event_id,
+                    detected_at=detected_at,
+                    source=event.source,
+                    score=event.score,
+                    snapshot_path=event_details.path,
+                    snapshot_url=event.snapshot_url,
+                    size_bytes=event_details.size_bytes,
+                )
+            )
+        return events, detected_at
+
+    def record_external_capture(self, source: str = "timer") -> list[MotionEventRecord]:
+        if not self.camera.is_available():
+            raise RuntimeError("Camera command is unavailable.")
+
+        events, _ = self._capture_event_snapshots(count=1, score=None, source=source)
+        with self._lock:
+            for event in events:
+                self._events.append(event)
+            self._last_error = None
+
+        self.sense_hat.show_status("capture-ok")
+        return events
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -270,27 +365,11 @@ class MotionDetector:
         return score
 
     def _record_event(self, score: float, capture_started: float) -> None:
-        events: list[MotionEventRecord] = []
-        detected_at: str | None = None
-        for _ in range(self.camera.burst_count()):
-            snapshot = self.camera.capture_snapshot()
-            detected_at = snapshot.modified_at or datetime.now(tz=timezone.utc).isoformat()
-            event_id = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-            event_path = self.event_dir / f"{event_id}.jpg"
-            shutil.copy2(self.camera.snapshot_path, event_path)
-            event_details = self.camera.details_for_path(event_path)
-
-            event = self._event_record_for_path(event_path, score=score)
-            events.append(
-                MotionEventRecord(
-                    event_id=event.event_id,
-                    detected_at=detected_at,
-                    score=event.score,
-                    snapshot_path=event_details.path,
-                    snapshot_url=event.snapshot_url,
-                    size_bytes=event_details.size_bytes,
-                )
-            )
+        events, detected_at = self._capture_event_snapshots(
+            count=self.camera.burst_count(),
+            score=score,
+            source="motion",
+        )
 
         with self._lock:
             for event in events:
