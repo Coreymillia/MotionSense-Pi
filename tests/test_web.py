@@ -47,13 +47,20 @@ class WebTests(unittest.TestCase):
 
         response = client.post(
             "/api/settings",
-            json={"poll_interval_seconds": 5.5, "burst_count": 3},
+            json={
+                "poll_interval_seconds": 5.5,
+                "cooldown_seconds": 15,
+                "motion_threshold": 12.5,
+                "burst_count": 3,
+            },
         )
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["status"]["motion"]["poll_interval_seconds"], 5.5)
+        self.assertEqual(payload["status"]["motion"]["cooldown_seconds"], 15.0)
+        self.assertEqual(payload["status"]["motion"]["motion_threshold"], 12.5)
         self.assertEqual(payload["status"]["camera"]["burst_count"], 3)
 
     def test_settings_endpoint_updates_resolution(self):

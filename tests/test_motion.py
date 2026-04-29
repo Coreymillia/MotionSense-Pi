@@ -164,6 +164,28 @@ class MotionDetectorTests(unittest.TestCase):
             )
             self.assertEqual(reloaded.poll_interval_seconds, 6.5)
 
+    def test_motion_settings_persist(self):
+        with TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "motion_config.json"
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+                config_path=config_path,
+            )
+
+            detector.set_cooldown_seconds(15.0)
+            detector.set_motion_threshold(12.5)
+
+            reloaded = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+                config_path=config_path,
+            )
+            self.assertEqual(reloaded.cooldown_seconds, 15.0)
+            self.assertEqual(reloaded.motion_threshold, 12.5)
+
     def test_delete_events_removes_selected_files(self):
         with TemporaryDirectory() as temp_dir:
             event_dir = Path(temp_dir) / "events"

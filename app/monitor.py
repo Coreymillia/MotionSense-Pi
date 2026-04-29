@@ -116,14 +116,31 @@ class MonitorService:
         poll_interval_seconds: float | None = None,
         burst_count: int | None = None,
         resolution: tuple[int, int] | None = None,
+        cooldown_seconds: float | None = None,
+        motion_threshold: float | None = None,
     ) -> dict[str, object]:
-        if poll_interval_seconds is None and burst_count is None and resolution is None:
+        if (
+            poll_interval_seconds is None
+            and burst_count is None
+            and resolution is None
+            and cooldown_seconds is None
+            and motion_threshold is None
+        ):
             raise RuntimeError("At least one setting is required.")
 
-        if poll_interval_seconds is not None:
+        if (
+            poll_interval_seconds is not None
+            or cooldown_seconds is not None
+            or motion_threshold is not None
+        ):
             if self.motion_detector is None:
                 raise RuntimeError("Motion detection is not configured.")
-            self.motion_detector.set_poll_interval_seconds(poll_interval_seconds)
+            if poll_interval_seconds is not None:
+                self.motion_detector.set_poll_interval_seconds(poll_interval_seconds)
+            if cooldown_seconds is not None:
+                self.motion_detector.set_cooldown_seconds(cooldown_seconds)
+            if motion_threshold is not None:
+                self.motion_detector.set_motion_threshold(motion_threshold)
 
         if burst_count is not None:
             self.camera.set_burst_count(burst_count)

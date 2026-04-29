@@ -174,12 +174,22 @@ def create_app(start_detector: bool = True) -> Flask:
         has_poll_interval = "poll_interval_seconds" in payload
         has_burst_count = "burst_count" in payload
         has_resolution = "resolution" in payload
-        if not has_poll_interval and not has_burst_count and not has_resolution:
+        has_cooldown = "cooldown_seconds" in payload
+        has_threshold = "motion_threshold" in payload
+        if (
+            not has_poll_interval
+            and not has_burst_count
+            and not has_resolution
+            and not has_cooldown
+            and not has_threshold
+        ):
             return jsonify({"ok": False, "error": "At least one setting is required."}), 400
 
         poll_interval = payload.get("poll_interval_seconds") if has_poll_interval else None
         burst_count = payload.get("burst_count") if has_burst_count else None
         resolution = payload.get("resolution") if has_resolution else None
+        cooldown = payload.get("cooldown_seconds") if has_cooldown else None
+        threshold = payload.get("motion_threshold") if has_threshold else None
 
         if has_poll_interval and (
             isinstance(poll_interval, bool) or not isinstance(poll_interval, (int, float))
@@ -191,6 +201,14 @@ def create_app(start_detector: bool = True) -> Flask:
             isinstance(burst_count, bool) or not isinstance(burst_count, int)
         ):
             return jsonify({"ok": False, "error": "burst_count must be an integer."}), 400
+        if has_cooldown and (
+            isinstance(cooldown, bool) or not isinstance(cooldown, (int, float))
+        ):
+            return jsonify({"ok": False, "error": "cooldown_seconds must be a number."}), 400
+        if has_threshold and (
+            isinstance(threshold, bool) or not isinstance(threshold, (int, float))
+        ):
+            return jsonify({"ok": False, "error": "motion_threshold must be a number."}), 400
         if has_resolution and not isinstance(resolution, str):
             return jsonify({"ok": False, "error": "resolution must be a string like 1280x720."}), 400
 
@@ -211,6 +229,8 @@ def create_app(start_detector: bool = True) -> Flask:
                         else None,
                         burst_count=burst_count if has_burst_count else None,
                         resolution=resolution_pair,
+                        cooldown_seconds=float(cooldown) if has_cooldown else None,
+                        motion_threshold=float(threshold) if has_threshold else None,
                     ),
                 }
             )

@@ -68,6 +68,7 @@ The browser dashboard supports:
 - manual snapshot capture
 - timed capture start/stop with second or minute intervals
 - configurable motion poll interval
+- configurable motion cooldown and threshold
 - configurable 1-5 photo burst capture for manual and motion-triggered snapshots
 - selectable capture resolution from safe preset camera modes
 - camera source selection

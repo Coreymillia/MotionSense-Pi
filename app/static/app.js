@@ -8,6 +8,8 @@ const networkCameraUrl = document.getElementById("network-camera-url");
 const networkCameraButton = document.getElementById("network-camera-button");
 const captureResolution = document.getElementById("capture-resolution");
 const motionPollInterval = document.getElementById("motion-poll-interval");
+const motionCooldown = document.getElementById("motion-cooldown");
+const motionThreshold = document.getElementById("motion-threshold");
 const captureBurstCount = document.getElementById("capture-burst-count");
 const settingsButton = document.getElementById("settings-button");
 const timerIntervalValue = document.getElementById("timer-interval-value");
@@ -279,8 +281,12 @@ function renderStatus(status) {
   renderTimer(status.timer);
   renderMotion(status.motion);
   motionPollInterval.disabled = !status.motion;
+  motionCooldown.disabled = !status.motion;
+  motionThreshold.disabled = !status.motion;
   if (status.motion) {
     motionPollInterval.value = `${status.motion.poll_interval_seconds}`;
+    motionCooldown.value = `${status.motion.cooldown_seconds}`;
+    motionThreshold.value = `${status.motion.motion_threshold}`;
   }
   renderSnapshot(status.snapshot);
   renderEvents(status.motion_events || []);
@@ -383,7 +389,19 @@ async function saveSettings() {
       message.textContent = "Enter a poll interval between 0.5 and 30 seconds.";
       return;
     }
+    const cooldown = Number.parseFloat(motionCooldown.value);
+    if (Number.isNaN(cooldown)) {
+      message.textContent = "Enter a cooldown between 1 and 300 seconds.";
+      return;
+    }
+    const threshold = Number.parseFloat(motionThreshold.value);
+    if (Number.isNaN(threshold)) {
+      message.textContent = "Enter a threshold between 1 and 255.";
+      return;
+    }
     body.poll_interval_seconds = pollInterval;
+    body.cooldown_seconds = cooldown;
+    body.motion_threshold = threshold;
   }
 
   message.textContent = "Saving settings...";

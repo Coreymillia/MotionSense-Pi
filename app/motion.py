@@ -73,6 +73,24 @@ class MotionDetector:
             raise RuntimeError("Poll interval must be between 0.5 and 30 seconds.")
         return normalized
 
+    @staticmethod
+    def _normalize_cooldown_seconds(value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError("Cooldown must be a number between 1 and 300 seconds.")
+        normalized = float(value)
+        if normalized < 1.0 or normalized > 300.0:
+            raise RuntimeError("Cooldown must be between 1 and 300 seconds.")
+        return normalized
+
+    @staticmethod
+    def _normalize_motion_threshold(value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError("Threshold must be a number between 1 and 255.")
+        normalized = float(value)
+        if normalized < 1.0 or normalized > 255.0:
+            raise RuntimeError("Threshold must be between 1 and 255.")
+        return normalized
+
     def _load_config(self) -> None:
         if self.config_path is None or not self.config_path.exists():
             return
@@ -88,18 +106,43 @@ class MotionDetector:
             )
         except RuntimeError:
             return
+        try:
+            self.cooldown_seconds = self._normalize_cooldown_seconds(
+                config.get("cooldown_seconds", self.cooldown_seconds)
+            )
+            self.motion_threshold = self._normalize_motion_threshold(
+                config.get("motion_threshold", self.motion_threshold)
+            )
+        except RuntimeError:
+            return
 
     def _save_config(self) -> None:
         if self.config_path is None:
             return
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"poll_interval_seconds": self.poll_interval_seconds}
+        payload = {
+            "poll_interval_seconds": self.poll_interval_seconds,
+            "cooldown_seconds": self.cooldown_seconds,
+            "motion_threshold": self.motion_threshold,
+        }
         self.config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def set_poll_interval_seconds(self, value: float) -> None:
         normalized = self._normalize_poll_interval(value)
         with self._lock:
             self.poll_interval_seconds = normalized
+        self._save_config()
+
+    def set_cooldown_seconds(self, value: float) -> None:
+        normalized = self._normalize_cooldown_seconds(value)
+        with self._lock:
+            self.cooldown_seconds = normalized
+        self._save_config()
+
+    def set_motion_threshold(self, value: float) -> None:
+        normalized = self._normalize_motion_threshold(value)
+        with self._lock:
+            self.motion_threshold = normalized
         self._save_config()
 
     def start(self) -> None:
