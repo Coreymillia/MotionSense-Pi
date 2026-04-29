@@ -14,6 +14,8 @@ It started as a custom build inspired by the product direction of motionEye, but
 - lets you switch camera sources from the browser UI and CYD
 - can run timed interval captures for stop-motion-style snapshots
 - stores the latest snapshot plus recent motion-triggered events
+- keeps recent events and archive views aligned with the saved event files on disk
+- can auto-prune the oldest saved event photos when free disk space gets low
 - runs lightweight frame-difference motion detection on the Pi
 - reads Sense HAT telemetry and shows:
   - temperature in Fahrenheit
@@ -71,10 +73,17 @@ The browser dashboard supports:
 - configurable motion cooldown and threshold
 - configurable 1-5 photo burst capture for manual and motion-triggered snapshots
 - selectable capture resolution from safe preset camera modes
+- selectable lighting presets for the Pi Camera:
+  - auto
+  - daylight
+  - fluorescent
+  - indoor
+  - low light
+- one-click 90 degree camera rotation with persisted orientation for live and saved images
 - camera source selection
 - ESP32-CAM URL storage
 - motion detector arm/pause
-- latest snapshot view
+- latest snapshot view from the saved `latest.jpg`
 - recent motion and timed-capture thumbnails with per-image download buttons
 - per-image and bulk delete/download controls for motion event images
 - a full browser archive page for older saved event images
@@ -117,6 +126,8 @@ Key endpoints used by the browser UI and CYD:
 - `POST /api/motion/stop`
 - `POST /api/camera/source`
 - `POST /api/camera/network`
+- `POST /api/camera/rotate`
+- `GET /api/events`
 - `GET /snapshot.jpg`
 - `GET /events/<filename>`
 
@@ -178,6 +189,14 @@ The installer:
 - installs Python requirements
 - writes the `motionsense-pi` systemd service
 - restarts the app on port `8080`
+
+## Storage and retention
+
+- motion and timed-capture images are stored on disk in `data/events`
+- the latest snapshot is stored separately as `data/latest.jpg`
+- the dashboard recent-events strip and archive both read from the saved event files
+- MotionSense Pi now keeps capturing until free space drops below a safety floor
+- when free space falls under **5 GB**, the app deletes the **oldest saved event photos first** so the Pi can keep saving new events without filling the filesystem
 
 After install:
 
@@ -262,7 +281,7 @@ Touch controls:
 Python tests:
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests -v
 ```
 
 Firmware builds:

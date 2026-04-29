@@ -55,6 +55,14 @@
               <dt>Burst Count</dt>
               <dd id="camera-burst-count">{{ status.camera.burst_count }}</dd>
             </div>
+            <div>
+              <dt>Rotation</dt>
+              <dd id="camera-rotation">{{ status.camera.rotation_degrees }}&deg;</dd>
+            </div>
+            <div>
+              <dt>Lighting</dt>
+              <dd id="camera-lighting">{{ status.camera.lighting.mode }}</dd>
+            </div>
           </dl>
           <div class="camera-config">
             <label for="network-camera-url">ESP32-CAM URL</label>
@@ -72,6 +80,13 @@
                     value="{{ option.width }}x{{ option.height }}"
                     {% if option.width == status.camera.resolution.width and option.height == status.camera.resolution.height %}selected{% endif %}
                   >
+                    {{ option.label }}
+                  </option>
+                {% endfor %}
+              </select>
+              <select id="capture-lighting">
+                {% for option in status.camera.lighting.options %}
+                  <option value="{{ option.mode }}" {% if option.mode == status.camera.lighting.mode %}selected{% endif %}>
                     {{ option.label }}
                   </option>
                 {% endfor %}
@@ -115,6 +130,9 @@
               </select>
               <button id="settings-button">Save Settings</button>
             </div>
+            <p id="camera-lighting-note" class="subtle">
+              Lighting presets tune the Pi Camera. Auto is the current default.
+            </p>
           </div>
         </article>
 
@@ -188,10 +206,13 @@
               {% endif %}
             </p>
           </div>
+          <div class="actions compact">
+            <button id="rotate-button" type="button">Rotate 90&deg;</button>
+          </div>
         </div>
         <div class="snapshot-frame">
             <img
-             id="snapshot-image"
+              id="snapshot-image"
              alt="Latest room snapshot"
              {% if status.snapshot.exists %}
             src="{{ status.snapshot.url }}?live=1"

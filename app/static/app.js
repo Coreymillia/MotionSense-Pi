@@ -7,6 +7,7 @@ const cameraSourceButton = document.getElementById("camera-source-button");
 const networkCameraUrl = document.getElementById("network-camera-url");
 const networkCameraButton = document.getElementById("network-camera-button");
 const captureResolution = document.getElementById("capture-resolution");
+const captureLighting = document.getElementById("capture-lighting");
 const motionPollInterval = document.getElementById("motion-poll-interval");
 const motionCooldown = document.getElementById("motion-cooldown");
 const motionThreshold = document.getElementById("motion-threshold");
@@ -16,12 +17,14 @@ const timerIntervalValue = document.getElementById("timer-interval-value");
 const timerIntervalUnit = document.getElementById("timer-interval-unit");
 const timerStartButton = document.getElementById("timer-start-button");
 const timerStopButton = document.getElementById("timer-stop-button");
+const rotateButton = document.getElementById("rotate-button");
 const motionStartButton = document.getElementById("motion-start-button");
 const motionStopButton = document.getElementById("motion-stop-button");
 const message = document.getElementById("message");
 const snapshotImage = document.getElementById("snapshot-image");
 const snapshotEmpty = document.getElementById("snapshot-empty");
 const snapshotMeta = document.getElementById("snapshot-meta");
+const cameraLightingNote = document.getElementById("camera-lighting-note");
 const senseHatPanel = document.getElementById("sensehat-panel");
 const timerPanel = document.getElementById("timer-panel");
 const motionPanel = document.getElementById("motion-panel");
@@ -60,6 +63,7 @@ function renderSenseHat(data) {
 }
 
 function renderCamera(data) {
+  const lighting = data.lighting || { mode: "auto", supported: false, options: [] };
   document.getElementById("camera-available").textContent = data.available ? "Yes" : "No";
   document.getElementById("camera-source-name").textContent = data.active_source_name || "Unavailable";
   document.getElementById("camera-backend").textContent = data.backend || "Unavailable";
@@ -67,6 +71,8 @@ function renderCamera(data) {
   document.getElementById("camera-resolution").textContent =
     `${data.resolution.width} x ${data.resolution.height}`;
   document.getElementById("camera-burst-count").textContent = `${data.burst_count || 1}`;
+  document.getElementById("camera-rotation").textContent = `${data.rotation_degrees || 0} deg`;
+  document.getElementById("camera-lighting").textContent = lighting.mode || "auto";
 
   cameraSourceSelect.innerHTML = "";
   for (const source of data.sources || []) {
@@ -80,9 +86,11 @@ function renderCamera(data) {
 
   cameraSourceSelect.disabled = !cameraSourceSelect.options.length;
   cameraSourceButton.disabled = cameraSourceSelect.disabled;
+  rotateButton.disabled = !data.available;
   networkCameraUrl.value = data.network_camera_url || "";
   captureBurstCount.value = `${data.burst_count || 1}`;
   captureResolution.innerHTML = "";
+  captureLighting.innerHTML = "";
   for (const option of data.resolution.options || []) {
     const selectOption = document.createElement("option");
     selectOption.value = `${option.width}x${option.height}`;
@@ -91,6 +99,16 @@ function renderCamera(data) {
       option.width === data.resolution.width && option.height === data.resolution.height;
     captureResolution.append(selectOption);
   }
+  for (const option of lighting.options || []) {
+    const selectOption = document.createElement("option");
+    selectOption.value = option.mode;
+    selectOption.textContent = option.label;
+    selectOption.selected = option.mode === lighting.mode;
+    captureLighting.append(selectOption);
+  }
+  cameraLightingNote.textContent = lighting.supported
+    ? "Lighting presets are active for the Pi Camera."
+    : "Lighting presets are saved, but only apply when the Pi Camera is active.";
 }
 
 function renderMotion(data) {
@@ -260,7 +278,7 @@ function renderEvents(events) {
 
 function renderSnapshot(snapshot) {
   if (snapshot.exists && snapshot.url) {
-    snapshotImage.src = `${snapshot.url}?live=1&t=${Date.now()}`;
+    snapshotImage.src = `${snapshot.url}?t=${Date.now()}`;
     snapshotImage.classList.remove("hidden");
     snapshotEmpty.classList.add("hidden");
     snapshotMeta.textContent = `Captured at ${snapshot.modified_at}`;
@@ -371,6 +389,22 @@ async function saveNetworkCameraUrl() {
   message.textContent = "ESP32-CAM URL saved.";
 }
 
+async function rotateCamera() {
+  message.textContent = "Rotating camera...";
+  rotateButton.disabled = true;
+  const response = await fetch("/api/camera/rotate", { method: "POST" });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    rotateButton.disabled = false;
+    message.textContent = payload.error || "Camera rotation failed.";
+    return;
+  }
+
+  renderStatus(payload.status);
+  message.textContent = `Camera rotated to ${payload.status.camera.rotation_degrees} degrees.`;
+}
+
 async function saveSettings() {
   const burstCount = Number.parseInt(captureBurstCount.value, 10);
   if (Number.isNaN(burstCount)) {
@@ -381,6 +415,7 @@ async function saveSettings() {
   const body = {
     burst_count: burstCount,
     resolution: captureResolution.value,
+    lighting_mode: captureLighting.value,
   };
 
   if (!motionPollInterval.disabled) {
@@ -561,6 +596,10 @@ timerStartButton.addEventListener("click", () => {
 });
 timerStopButton.addEventListener("click", () => {
   void stopTimer();
+});
+
+rotateButton.addEventListener("click", () => {
+  void rotateCamera();
 });
 
 refreshButton.addEventListener("click", () => {

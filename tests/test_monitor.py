@@ -104,6 +104,8 @@ class MonitorServiceTests(unittest.TestCase):
             self.assertTrue(payload["motion"]["armed"])
             self.assertFalse(payload["timer"]["armed"])
             self.assertEqual(payload["camera"]["burst_count"], 1)
+            self.assertEqual(payload["camera"]["rotation_degrees"], 0)
+            self.assertEqual(payload["camera"]["lighting"]["mode"], "auto")
             self.assertIn("options", payload["camera"]["resolution"])
             self.assertEqual(len(payload["motion_events"]), 1)
 
@@ -126,6 +128,11 @@ class MonitorServiceTests(unittest.TestCase):
         camera.selected_source_name = Mock(return_value="USB Camera (video1)")
         camera.network_camera_url = Mock(return_value=None)
         camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.rotate_clockwise = Mock(return_value=90)
         camera.set_burst_count = Mock()
         camera.active_capture_target = Mock(return_value="/dev/video1")
         camera.list_sources = Mock(return_value=[])
@@ -148,10 +155,65 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertEqual(payload["snapshot"]["modified_at"], "2026-04-15T21:26:38+00:00")
         self.assertEqual(sense_hat.statuses[-1], "capture-ok")
 
+    def test_set_camera_rotation_refreshes_snapshot(self):
+        camera = Mock()
+        camera.rotate_clockwise = Mock(return_value=90)
+        camera.capture_snapshot = Mock(
+            return_value=SnapshotDetails(
+                exists=True,
+                path="/tmp/latest.jpg",
+                modified_at="2026-04-15T21:26:38+00:00",
+                size_bytes=28960,
+            )
+        )
+        camera.capture_snapshot_burst = Mock(return_value=[camera.capture_snapshot.return_value])
+        camera.snapshot_details = Mock(return_value=camera.capture_snapshot.return_value)
+        camera.active_source = Mock(return_value=None)
+        camera.is_available = Mock(return_value=True)
+        camera.selected_source_id = Mock(return_value="pi-camera")
+        camera.selected_source_name = Mock(return_value="Pi Camera")
+        camera.network_camera_url = Mock(return_value=None)
+        camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=90)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
+        camera.list_sources = Mock(return_value=[])
+        camera.resolution_payload = Mock(
+            return_value={
+                "width": 1280,
+                "height": 720,
+                "options": [{"width": 1280, "height": 720, "label": "1280 x 720"}],
+            }
+        )
+        camera.width = 1280
+        camera.height = 720
+
+        sense_hat = FakeSenseHat()
+        monitor = MonitorService(
+            camera=camera,
+            sense_hat=sense_hat,
+            motion_detector=FakeMotionDetector(),
+            timed_capture=FakeTimedCapture(),
+        )
+
+        payload = monitor.set_camera_rotation_clockwise()
+
+        camera.rotate_clockwise.assert_called_once_with()
+        camera.capture_snapshot.assert_called_once_with()
+        self.assertEqual(payload["camera"]["rotation_degrees"], 90)
+        self.assertEqual(sense_hat.statuses[-1], "capture-ok")
+
     def test_update_capture_settings_updates_motion_and_camera(self):
         camera = Mock()
         camera.set_burst_count = Mock()
         camera.burst_count = Mock(return_value=3)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.set_lighting_mode = Mock()
         camera.set_resolution = Mock()
         camera.resolution_payload = Mock(
             return_value={
@@ -197,6 +259,11 @@ class MonitorServiceTests(unittest.TestCase):
         camera.set_burst_count = Mock()
         camera.set_resolution = Mock()
         camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.set_lighting_mode = Mock()
         camera.resolution_payload = Mock(
             return_value={
                 "width": 1280,
@@ -245,6 +312,11 @@ class MonitorServiceTests(unittest.TestCase):
         camera.set_burst_count = Mock()
         camera.set_resolution = Mock()
         camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.set_lighting_mode = Mock()
         camera.resolution_payload = Mock(
             return_value={
                 "width": 3280,
@@ -282,6 +354,53 @@ class MonitorServiceTests(unittest.TestCase):
         camera.set_resolution.assert_called_once_with(3280, 2464)
         self.assertEqual(payload["camera"]["resolution"]["width"], 3280)
 
+    def test_update_capture_settings_updates_lighting_mode(self):
+        camera = Mock()
+        camera.set_burst_count = Mock()
+        camera.set_resolution = Mock()
+        camera.set_lighting_mode = Mock()
+        camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "fluorescent", "supported": True, "options": []}
+        )
+        camera.resolution_payload = Mock(
+            return_value={
+                "width": 1280,
+                "height": 720,
+                "options": [{"width": 1280, "height": 720, "label": "1280 x 720"}],
+            }
+        )
+        camera.snapshot_details = Mock(
+            return_value=SnapshotDetails(
+                exists=False,
+                path="/tmp/latest.jpg",
+                modified_at=None,
+                size_bytes=None,
+            )
+        )
+        camera.active_source = Mock(return_value=None)
+        camera.is_available = Mock(return_value=True)
+        camera.selected_source_id = Mock(return_value="pi-camera")
+        camera.selected_source_name = Mock(return_value="Pi Camera")
+        camera.network_camera_url = Mock(return_value=None)
+        camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
+        camera.list_sources = Mock(return_value=[])
+        camera.width = 1280
+        camera.height = 720
+
+        monitor = MonitorService(
+            camera=camera,
+            sense_hat=FakeSenseHat(),
+            motion_detector=FakeMotionDetector(),
+            timed_capture=FakeTimedCapture(),
+        )
+
+        payload = monitor.update_capture_settings(lighting_mode="fluorescent")
+
+        camera.set_lighting_mode.assert_called_once_with("fluorescent")
+        self.assertEqual(payload["camera"]["lighting"]["mode"], "fluorescent")
+
     def test_archived_events_payload_passes_through_to_motion_detector(self):
         with TemporaryDirectory() as temp_dir:
             camera = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
@@ -313,6 +432,10 @@ class MonitorServiceTests(unittest.TestCase):
         camera.selected_source_name = Mock(return_value="Pi Camera")
         camera.network_camera_url = Mock(return_value=None)
         camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
         camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
         camera.list_sources = Mock(return_value=[])
         camera.width = 1280

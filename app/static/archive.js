@@ -106,6 +106,17 @@ function renderArchiveEvents(events) {
   updateArchiveActionButtons();
 }
 
+async function refreshArchiveEvents() {
+  const response = await fetch("/api/events");
+  const payload = await response.json();
+  if (!response.ok) {
+    archiveMessage.textContent = payload.error || "Archive refresh failed.";
+    return;
+  }
+
+  renderArchiveEvents(payload.events || []);
+}
+
 async function downloadArchiveEvents(filenames) {
   if (!filenames.length) {
     archiveMessage.textContent = "Select at least one event image.";
@@ -195,3 +206,6 @@ archiveDeleteButton.addEventListener("click", () => {
 });
 
 renderArchiveEvents(initialEvents);
+window.setInterval(() => {
+  void refreshArchiveEvents();
+}, 15000);

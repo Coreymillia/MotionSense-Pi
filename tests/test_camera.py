@@ -4,6 +4,8 @@ import unittest
 from unittest.mock import Mock, patch
 from urllib.error import URLError
 
+from PIL import Image
+
 from app.camera import CameraService, CameraSource
 
 
@@ -191,6 +193,89 @@ class CameraServiceTests(unittest.TestCase):
                 options = service.resolution_options()
 
             self.assertIn((2000, 1500), {(option.width, option.height) for option in options})
+
+    def test_rotation_persists_in_camera_config(self):
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "latest.jpg"
+            service = CameraService(snapshot_path=snapshot_path)
+
+            service.rotate_clockwise()
+            service.rotate_clockwise()
+
+            reloaded = CameraService(snapshot_path=snapshot_path)
+            self.assertEqual(reloaded.rotation_degrees(), 180)
+
+    def test_lighting_mode_persists_in_camera_config(self):
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "latest.jpg"
+            service = CameraService(snapshot_path=snapshot_path)
+
+            service.set_lighting_mode("fluorescent")
+
+            reloaded = CameraService(snapshot_path=snapshot_path)
+            self.assertEqual(reloaded.lighting_mode(), "fluorescent")
+
+    def test_pi_capture_command_uses_selected_lighting_profile(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service.rpicam_executable = "/usr/bin/rpicam-still"
+            service.set_lighting_mode("low-light")
+
+            with patch("app.camera.subprocess.run") as run:
+                service._capture_pi_image(Path(temp_dir) / "frame.jpg", width=640, height=480, quality=90)
+
+            command = run.call_args.args[0]
+            self.assertIn("--awb", command)
+            self.assertIn("auto", command)
+            self.assertIn("--metering", command)
+            self.assertIn("average", command)
+            self.assertIn("--denoise", command)
+            self.assertIn("cdn_hq", command)
+
+    def test_capture_image_applies_configured_rotation(self):
+        with TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "frame.jpg"
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            usb_source = CameraSource(
+                source_id="usb-video1",
+                label="USB Camera (video1)",
+                kind="usb",
+                available=True,
+                backend="v4l2",
+                command="/usr/bin/v4l2-ctl",
+                device="/dev/video1",
+            )
+            service.set_rotation_degrees(90)
+
+            def write_test_image(device, path, width, height):
+                Image.new("RGB", (width, height), color="orange").save(path, format="JPEG")
+
+            with patch.object(service, "active_source", return_value=usb_source), patch.object(
+                service, "_capture_usb_image", side_effect=write_test_image
+            ):
+                service.capture_image(output_path=output_path, width=640, height=480)
+
+            with Image.open(output_path) as saved_image:
+                self.assertEqual((saved_image.width, saved_image.height), (480, 640))
+
+    def test_lighting_payload_reports_pi_support(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            pi_source = CameraSource(
+                source_id="pi-camera",
+                label="Pi Camera",
+                kind="pi",
+                available=True,
+                backend="libcamera",
+                command="/usr/bin/rpicam-still",
+            )
+
+            with patch.object(service, "active_source", return_value=pi_source):
+                payload = service.lighting_payload()
+
+            self.assertTrue(payload["supported"])
+            self.assertEqual(payload["mode"], "auto")
+            self.assertGreaterEqual(len(payload["options"]), 4)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ class MotionDetector:
         cooldown_seconds: float = 10.0,
         motion_threshold: float = 18.0,
         max_events: int = 12,
+        min_free_space_bytes: int = 5 * 1024 * 1024 * 1024,
     ) -> None:
         self.camera = camera
         self.sense_hat = sense_hat
@@ -47,6 +48,7 @@ class MotionDetector:
         self.cooldown_seconds = cooldown_seconds
         self.motion_threshold = motion_threshold
         self.max_events = max_events
+        self.min_free_space_bytes = min_free_space_bytes
 
         self.event_dir.mkdir(parents=True, exist_ok=True)
 
@@ -166,6 +168,7 @@ class MotionDetector:
         self.sense_hat.show_status("idle")
 
     def status_payload(self) -> dict[str, Any]:
+        event_count = self.archived_event_count()
         with self._lock:
             running = self._thread is not None and self._thread.is_alive()
             return {
@@ -178,7 +181,7 @@ class MotionDetector:
                 "last_probe_at": self._last_probe_at,
                 "last_motion_at": self._last_motion_at,
                 "last_error": self._last_error,
-                "event_count": len(self._events),
+                "event_count": event_count,
             }
 
     def events_payload(self) -> list[dict[str, Any]]:
@@ -197,6 +200,13 @@ class MotionDetector:
         if limit is not None:
             event_paths = event_paths[: max(limit, 0)]
         return [asdict(self._event_record_for_path(path)) for path in event_paths]
+
+    def archived_event_count(self) -> int:
+        return sum(
+            1
+            for path in self.event_dir.glob("*.jpg")
+            if path.is_file() and path.name != self._probe_path.name
+        )
 
     def selected_event_paths(self, filenames: list[str]) -> list[Path]:
         if not filenames:
@@ -314,6 +324,47 @@ class MotionDetector:
             size_bytes=path.stat().st_size,
         )
 
+    def _event_image_paths_oldest_first(self) -> list[Path]:
+        return sorted(
+            (
+                path
+                for path in self.event_dir.glob("*.jpg")
+                if path.is_file() and path.name != self._probe_path.name
+            ),
+            key=lambda path: path.stat().st_mtime,
+        )
+
+    def _prune_oldest_events_if_needed(self) -> list[str]:
+        deleted_filenames: list[str] = []
+        while True:
+            usage = shutil.disk_usage(self.event_dir)
+            if usage.free >= self.min_free_space_bytes:
+                break
+
+            event_paths = self._event_image_paths_oldest_first()
+            if not event_paths:
+                break
+
+            oldest_event_path = event_paths[0]
+            oldest_event_path.unlink(missing_ok=True)
+            self._metadata_path_for_event(oldest_event_path).unlink(missing_ok=True)
+            deleted_filenames.append(oldest_event_path.name)
+
+        if not deleted_filenames:
+            return deleted_filenames
+
+        deleted_names = set(deleted_filenames)
+        with self._lock:
+            self._events = deque(
+                (
+                    event
+                    for event in self._events
+                    if Path(event.snapshot_path).name not in deleted_names
+                ),
+                maxlen=self.max_events,
+            )
+        return deleted_filenames
+
     def _capture_event_snapshots(
         self,
         count: int,
@@ -325,6 +376,7 @@ class MotionDetector:
         for _ in range(max(count, 1)):
             snapshot = self.camera.capture_snapshot()
             detected_at = snapshot.modified_at or datetime.now(tz=timezone.utc).isoformat()
+            self._prune_oldest_events_if_needed()
             event_id = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
             event_path = self.event_dir / f"{event_id}.jpg"
             shutil.copy2(self.camera.snapshot_path, event_path)

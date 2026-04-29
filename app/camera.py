@@ -15,6 +15,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from PIL import Image
+
 
 @dataclass(frozen=True)
 class SnapshotDetails:
@@ -43,7 +45,85 @@ class ResolutionOption:
     label: str
 
 
+@dataclass(frozen=True)
+class LightingOption:
+    mode: str
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
+class LightingProfile:
+    mode: str
+    label: str
+    description: str
+    awb: str
+    exposure: str
+    metering: str
+    brightness: float
+    contrast: float
+    denoise: str
+
+
 class CameraService:
+    LIGHTING_PROFILES: tuple[LightingProfile, ...] = (
+        LightingProfile(
+            mode="auto",
+            label="Auto",
+            description="Let the Pi camera choose white balance and cleanup automatically.",
+            awb="auto",
+            exposure="normal",
+            metering="centre",
+            brightness=0.0,
+            contrast=1.0,
+            denoise="auto",
+        ),
+        LightingProfile(
+            mode="daylight",
+            label="Daylight",
+            description="Tune colors for sunlight or bright window light.",
+            awb="daylight",
+            exposure="normal",
+            metering="centre",
+            brightness=0.0,
+            contrast=1.0,
+            denoise="auto",
+        ),
+        LightingProfile(
+            mode="fluorescent",
+            label="Fluorescent",
+            description="Compensate for cool fluorescent room lighting.",
+            awb="fluorescent",
+            exposure="normal",
+            metering="centre",
+            brightness=0.0,
+            contrast=1.0,
+            denoise="auto",
+        ),
+        LightingProfile(
+            mode="indoor",
+            label="Indoor",
+            description="Warm up colors for common indoor household lighting.",
+            awb="indoor",
+            exposure="normal",
+            metering="centre",
+            brightness=0.03,
+            contrast=1.02,
+            denoise="auto",
+        ),
+        LightingProfile(
+            mode="low-light",
+            label="Low Light",
+            description="Favor darker rooms with stronger denoise and slightly brighter output.",
+            awb="auto",
+            exposure="normal",
+            metering="average",
+            brightness=0.08,
+            contrast=1.05,
+            denoise="cdn_hq",
+        ),
+    )
+
     def __init__(
         self,
         snapshot_path: Path,
@@ -63,6 +143,8 @@ class CameraService:
         self._selected_source_name: str | None = None
         self._network_camera_url: str | None = None
         self._burst_count = 1
+        self._rotation_degrees = 0
+        self._lighting_mode = "auto"
         self._resolution_options: tuple[ResolutionOption, ...] | None = None
         self._source_cache_ttl_seconds = 5.0
         self._source_cache_at = 0.0
@@ -96,6 +178,20 @@ class CameraService:
             self._burst_count = 1
 
         try:
+            self._rotation_degrees = self._normalize_rotation_degrees(
+                config.get("rotation_degrees", 0)
+            )
+        except RuntimeError:
+            self._rotation_degrees = 0
+
+        try:
+            self._lighting_mode = self._normalize_lighting_mode(
+                config.get("lighting_mode", self._lighting_mode)
+            )
+        except RuntimeError:
+            self._lighting_mode = "auto"
+
+        try:
             self.width, self.height = self._normalize_resolution(
                 config.get("width", self.width),
                 config.get("height", self.height),
@@ -111,6 +207,8 @@ class CameraService:
             "selected_source_name": self._selected_source_name,
             "network_camera_url": self._network_camera_url,
             "burst_count": self._burst_count,
+            "rotation_degrees": self._rotation_degrees,
+            "lighting_mode": self._lighting_mode,
             "width": self.width,
             "height": self.height,
         }
@@ -150,6 +248,63 @@ class CameraService:
     def set_burst_count(self, value: int) -> None:
         self._burst_count = self._normalize_burst_count(value)
         self._save_config()
+
+    @staticmethod
+    def _normalize_rotation_degrees(value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise RuntimeError("Rotation must be 0, 90, 180, or 270 degrees.")
+        if value not in {0, 90, 180, 270}:
+            raise RuntimeError("Rotation must be 0, 90, 180, or 270 degrees.")
+        return value
+
+    def rotation_degrees(self) -> int:
+        return self._rotation_degrees
+
+    def set_rotation_degrees(self, value: int) -> None:
+        self._rotation_degrees = self._normalize_rotation_degrees(value)
+        self._save_config()
+
+    def rotate_clockwise(self) -> int:
+        self._rotation_degrees = (self._rotation_degrees + 90) % 360
+        self._save_config()
+        return self._rotation_degrees
+
+    @staticmethod
+    def _lighting_profiles_by_mode() -> dict[str, LightingProfile]:
+        return {profile.mode: profile for profile in CameraService.LIGHTING_PROFILES}
+
+    @classmethod
+    def _normalize_lighting_mode(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise RuntimeError("Lighting mode must be one of the supported presets.")
+        normalized = value.strip().lower()
+        if normalized not in cls._lighting_profiles_by_mode():
+            raise RuntimeError("Lighting mode must be one of the supported presets.")
+        return normalized
+
+    def lighting_mode(self) -> str:
+        return self._lighting_mode
+
+    def set_lighting_mode(self, value: str) -> None:
+        self._lighting_mode = self._normalize_lighting_mode(value)
+        self._save_config()
+
+    def lighting_payload(self) -> dict[str, Any]:
+        active_source = self.active_source()
+        return {
+            "mode": self._lighting_mode,
+            "supported": active_source is not None and active_source.kind == "pi",
+            "options": [
+                asdict(
+                    LightingOption(
+                        mode=profile.mode,
+                        label=profile.label,
+                        description=profile.description,
+                    )
+                )
+                for profile in self.LIGHTING_PROFILES
+            ],
+        }
 
     @staticmethod
     def _resolution_key(width: int, height: int) -> tuple[int, int]:
@@ -498,6 +653,25 @@ class CameraService:
     def snapshot_details(self) -> SnapshotDetails:
         return self.details_for_path(self.snapshot_path)
 
+    def _apply_rotation(self, output_path: Path) -> None:
+        if self._rotation_degrees == 0:
+            return
+
+        with tempfile.NamedTemporaryFile(
+            suffix=output_path.suffix or ".jpg",
+            delete=False,
+            dir=output_path.parent,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+
+        try:
+            with Image.open(output_path) as image:
+                rotated = image.rotate(-self._rotation_degrees, expand=True)
+                rotated.save(temp_path, format="JPEG", quality=95)
+            temp_path.replace(output_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
     def _capture_pi_image(
         self,
         output_path: Path,
@@ -508,6 +682,7 @@ class CameraService:
         if self.rpicam_executable is None:
             raise RuntimeError("rpicam-still is not installed on this device.")
 
+        lighting_profile = self._lighting_profiles_by_mode()[self._lighting_mode]
         command = [
             self.rpicam_executable,
             "--output",
@@ -522,6 +697,18 @@ class CameraService:
             str(height),
             "--quality",
             str(quality),
+            "--awb",
+            lighting_profile.awb,
+            "--exposure",
+            lighting_profile.exposure,
+            "--metering",
+            lighting_profile.metering,
+            "--brightness",
+            str(lighting_profile.brightness),
+            "--contrast",
+            str(lighting_profile.contrast),
+            "--denoise",
+            lighting_profile.denoise,
         ]
 
         subprocess.run(
@@ -621,6 +808,7 @@ class CameraService:
                     self._capture_network_image(output_path)
                 else:
                     raise RuntimeError(f"Unsupported camera source '{source.label}'.")
+                self._apply_rotation(output_path)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("Snapshot capture timed out.") from exc
         except subprocess.CalledProcessError as exc:

@@ -29,6 +29,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("motion_events", payload)
         self.assertIn("network_camera_url", payload["camera"])
         self.assertIn("burst_count", payload["camera"])
+        self.assertIn("rotation_degrees", payload["camera"])
+        self.assertIn("lighting", payload["camera"])
         self.assertIn("options", payload["camera"]["resolution"])
 
     def test_network_camera_endpoint_accepts_url(self):
@@ -78,6 +80,38 @@ class WebTests(unittest.TestCase):
         self.assertEqual(payload["status"]["camera"]["resolution"]["width"], 3280)
         self.assertEqual(payload["status"]["camera"]["resolution"]["height"], 2464)
 
+    def test_settings_endpoint_updates_lighting_mode(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/settings",
+            json={"lighting_mode": "fluorescent"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"]["camera"]["lighting"]["mode"], "fluorescent")
+
+    def test_rotate_camera_endpoint_updates_snapshot(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        with patch(
+            "app.monitor.MonitorService.set_camera_rotation_clockwise",
+            return_value={
+                "camera": {"rotation_degrees": 90},
+                "snapshot": {"exists": True, "url": "/snapshot.jpg"},
+            },
+        ):
+            response = client.post("/api/camera/rotate")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"]["camera"]["rotation_degrees"], 90)
+
     def test_timer_start_endpoint_updates_interval(self):
         app = create_app(start_detector=False)
         client = app.test_client()
@@ -116,6 +150,21 @@ class WebTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["deleted_count"], 1)
+
+    def test_events_endpoint_returns_archived_events(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        with patch(
+            "app.monitor.MonitorService.archived_events_payload",
+            return_value=[{"event_id": "evt-1", "snapshot_url": "/events/evt-1.jpg"}],
+        ):
+            response = client.get("/api/events")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["events"][0]["event_id"], "evt-1")
 
     def test_events_download_endpoint_returns_zip_bundle(self):
         with TemporaryDirectory() as temp_dir:

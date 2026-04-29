@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import shutil
 import time
 import unittest
 
@@ -114,6 +116,27 @@ class MotionDetectorTests(unittest.TestCase):
             self.assertEqual(events[0]["source"], "motion")
             self.assertIsNone(events[0]["score"])
 
+    def test_status_payload_event_count_uses_saved_images(self):
+        with TemporaryDirectory() as temp_dir:
+            event_dir = Path(temp_dir) / "events"
+            event_dir.mkdir(parents=True, exist_ok=True)
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=event_dir,
+            )
+
+            Image.new("RGB", (320, 240), color="red").save(
+                event_dir / "20260416T201500000000Z.jpg", format="JPEG"
+            )
+            Image.new("RGB", (320, 240), color="blue").save(
+                event_dir / "20260416T201700000000Z.jpg", format="JPEG"
+            )
+
+            payload = detector.status_payload()
+
+            self.assertEqual(payload["event_count"], 2)
+
     def test_record_event_captures_burst_count_images(self):
         with TemporaryDirectory() as temp_dir:
             camera = FakeCamera(Path(temp_dir) / "latest.jpg")
@@ -143,6 +166,46 @@ class MotionDetectorTests(unittest.TestCase):
             self.assertEqual(events[0].source, "timer")
             archived = detector.archived_events_payload()
             self.assertEqual(archived[0]["source"], "timer")
+
+    def test_record_event_prunes_oldest_saved_images_when_space_is_low(self):
+        with TemporaryDirectory() as temp_dir:
+            event_dir = Path(temp_dir) / "events"
+            event_dir.mkdir(parents=True, exist_ok=True)
+            oldest_event = event_dir / "20260416T201500000000Z.jpg"
+            newest_event = event_dir / "20260416T201700000000Z.jpg"
+            Image.new("RGB", (320, 240), color="red").save(oldest_event, format="JPEG")
+            Image.new("RGB", (320, 240), color="blue").save(newest_event, format="JPEG")
+            oldest_metadata = oldest_event.with_suffix(".json")
+            newest_metadata = newest_event.with_suffix(".json")
+            oldest_metadata.write_text("{}", encoding="utf-8")
+            newest_metadata.write_text("{}", encoding="utf-8")
+            os.utime(oldest_event, (1, 1))
+            os.utime(oldest_metadata, (1, 1))
+            os.utime(newest_event, (2, 2))
+            os.utime(newest_metadata, (2, 2))
+
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=event_dir,
+                min_free_space_bytes=10,
+            )
+
+            disk_usage_type = type(shutil.disk_usage(event_dir))
+            real_usage = shutil.disk_usage(event_dir)
+            low_space = disk_usage_type(real_usage.total, real_usage.used, 0)
+            recovered_space = disk_usage_type(real_usage.total, real_usage.used, 20)
+
+            with unittest.mock.patch(
+                "app.motion.shutil.disk_usage",
+                side_effect=[low_space, recovered_space],
+            ):
+                detector._record_event(score=22.0, capture_started=time.monotonic())
+
+            self.assertFalse(oldest_event.exists())
+            self.assertFalse(oldest_metadata.exists())
+            self.assertTrue(newest_event.exists())
+            self.assertTrue(newest_metadata.exists())
 
     def test_poll_interval_setting_persists(self):
         with TemporaryDirectory() as temp_dir:

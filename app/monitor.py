@@ -46,6 +46,8 @@ class MonitorService:
                 "backend": active_source.backend if active_source is not None else None,
                 "network_camera_url": self.camera.network_camera_url(),
                 "burst_count": self.camera.burst_count(),
+                "rotation_degrees": self.camera.rotation_degrees(),
+                "lighting": self.camera.lighting_payload(),
                 "target": self.camera.active_capture_target(),
                 "sources": self.camera.list_sources(),
                 "resolution": self.camera.resolution_payload(),
@@ -63,7 +65,9 @@ class MonitorService:
                 else None
             ),
             "motion_events": (
-                self.motion_detector.events_payload()
+                self.motion_detector.archived_events_payload(
+                    limit=getattr(self.motion_detector, "max_events", 12)
+                )
                 if self.motion_detector is not None
                 else []
             ),
@@ -111,11 +115,20 @@ class MonitorService:
         self.sense_hat.show_status("idle")
         return self.status_payload()
 
+    def set_camera_rotation_clockwise(self) -> dict[str, object]:
+        self.camera.rotate_clockwise()
+        snapshot = self.camera.capture_snapshot()
+        self.sense_hat.show_status("capture-ok")
+        payload = self.status_payload()
+        payload["snapshot"] = self._snapshot_payload(snapshot)
+        return payload
+
     def update_capture_settings(
         self,
         poll_interval_seconds: float | None = None,
         burst_count: int | None = None,
         resolution: tuple[int, int] | None = None,
+        lighting_mode: str | None = None,
         cooldown_seconds: float | None = None,
         motion_threshold: float | None = None,
     ) -> dict[str, object]:
@@ -123,6 +136,7 @@ class MonitorService:
             poll_interval_seconds is None
             and burst_count is None
             and resolution is None
+            and lighting_mode is None
             and cooldown_seconds is None
             and motion_threshold is None
         ):
@@ -147,6 +161,9 @@ class MonitorService:
 
         if resolution is not None:
             self.camera.set_resolution(*resolution)
+
+        if lighting_mode is not None:
+            self.camera.set_lighting_mode(lighting_mode)
 
         return self.status_payload()
 
