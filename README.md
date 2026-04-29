@@ -80,11 +80,15 @@ The browser dashboard supports:
   - indoor
   - low light
 - one-click 90 degree camera rotation with persisted orientation for live and saved images
-- camera source selection
+- camera source selection for the Pi Camera, supported USB webcams, and optional ESP32-CAM
 - ESP32-CAM URL storage
 - motion detector arm/pause
 - latest snapshot view from the saved `latest.jpg`
-- recent motion and timed-capture thumbnails with per-image download buttons
+- recent motion and timed-capture previews that show the whole image without thumbnail cropping
+- click-to-open fullscreen event viewer with keyboard navigation:
+  - left arrow for previous image
+  - right arrow for next image
+  - escape to close
 - per-image and bulk delete/download controls for motion event images
 - a full browser archive page for older saved event images
 - Sense HAT telemetry

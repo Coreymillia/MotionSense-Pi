@@ -230,11 +230,21 @@ dd {
   background: rgba(2, 6, 23, 0.75);
 }
 
+.event-image-link {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  padding: 0.75rem;
+  background: rgba(15, 23, 42, 0.9);
+  text-decoration: none;
+}
+
 .event-card img {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
+  max-height: 260px;
+  height: auto;
+  object-fit: contain;
   background: #020617;
 }
 
@@ -305,6 +315,51 @@ dd {
 
 .archive-meta {
   margin-bottom: 1rem;
+}
+
+.lightbox-open {
+  overflow: hidden;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.92);
+}
+
+.lightbox-dialog {
+  width: min(96vw, 1200px);
+  max-height: 96vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lightbox-controls {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.lightbox-image {
+  display: block;
+  width: 100%;
+  max-height: calc(96vh - 7rem);
+  object-fit: contain;
+  background: #000;
+  border-radius: 12px;
+}
+
+.lightbox-caption {
+  margin: 0;
+  color: #cbd5e1;
+  text-align: center;
 }
 
 @media (max-width: 720px) {

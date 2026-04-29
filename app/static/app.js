@@ -34,6 +34,103 @@ const eventsDownloadButton = document.getElementById("events-download-button");
 const eventsDeleteButton = document.getElementById("events-delete-button");
 let currentEvents = [];
 const selectedEventFilenames = new Set();
+const eventLightbox = createEventLightbox();
+
+function createEventLightbox() {
+  const overlay = document.createElement("div");
+  overlay.className = "lightbox hidden";
+
+  const dialog = document.createElement("div");
+  dialog.className = "lightbox-dialog";
+
+  const controls = document.createElement("div");
+  controls.className = "lightbox-controls";
+
+  const previousButton = document.createElement("button");
+  previousButton.type = "button";
+  previousButton.textContent = "Previous";
+
+  const nextButton = document.createElement("button");
+  nextButton.type = "button";
+  nextButton.textContent = "Next";
+
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.textContent = "Close";
+
+  const image = document.createElement("img");
+  image.className = "lightbox-image";
+  image.alt = "";
+
+  const caption = document.createElement("p");
+  caption.className = "lightbox-caption";
+
+  controls.append(previousButton, nextButton, closeButton);
+  dialog.append(controls, image, caption);
+  overlay.append(dialog);
+  document.body.append(overlay);
+
+  let items = [];
+  let currentIndex = 0;
+
+  function showIndex(index) {
+    if (!items.length) {
+      return;
+    }
+    currentIndex = (index + items.length) % items.length;
+    const event = items[currentIndex];
+    const filename = event.snapshot_url.split("/").pop() || "motion-event.jpg";
+    image.src = `${event.snapshot_url}?t=${Date.now()}`;
+    image.alt = `Motion event ${event.detected_at}`;
+    caption.textContent = `${new Date(event.detected_at).toLocaleString()} - ${filename}`;
+  }
+
+  function close() {
+    overlay.classList.add("hidden");
+    image.removeAttribute("src");
+    document.body.classList.remove("lightbox-open");
+  }
+
+  function open(nextItems, startIndex) {
+    items = nextItems;
+    overlay.classList.remove("hidden");
+    document.body.classList.add("lightbox-open");
+    showIndex(startIndex);
+  }
+
+  function showPrevious() {
+    showIndex(currentIndex - 1);
+  }
+
+  function showNext() {
+    showIndex(currentIndex + 1);
+  }
+
+  previousButton.addEventListener("click", showPrevious);
+  nextButton.addEventListener("click", showNext);
+  closeButton.addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) {
+      close();
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (overlay.classList.contains("hidden")) {
+      return;
+    }
+    if (event.key === "Escape") {
+      close();
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      showPrevious();
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      showNext();
+    }
+  });
+
+  return { open };
+}
 
 function addDefinitionRow(container, label, value) {
   const row = document.createElement("div");
@@ -203,7 +300,7 @@ function renderEvents(events) {
     return;
   }
 
-  for (const event of events) {
+  for (const [index, event] of events.entries()) {
     const card = document.createElement("article");
     card.className = "event-card";
 
@@ -229,9 +326,20 @@ function renderEvents(events) {
     selectionLabel.textContent = "Select";
     selection.append(checkbox, selectionLabel);
 
+    const imageLink = document.createElement("a");
+    imageLink.className = "event-image-link";
+    imageLink.href = event.snapshot_url;
+    imageLink.title = "Open full image";
+    imageLink.addEventListener("click", (clickEvent) => {
+      clickEvent.preventDefault();
+      eventLightbox.open(currentEvents, index);
+    });
+
     const img = document.createElement("img");
     img.alt = `Motion event ${event.detected_at}`;
-    img.src = `${event.snapshot_url}?t=${Date.now()}`;
+    img.src = `${event.snapshot_url}?max_w=480&max_h=360&quality=70&t=${Date.now()}`;
+    img.loading = "lazy";
+    imageLink.append(img);
 
     const body = document.createElement("div");
     body.className = "event-card-body";
@@ -269,7 +377,7 @@ function renderEvents(events) {
 
     actions.append(download, removeButton);
     body.append(selection, title, path, badge, actions);
-    card.append(img, body);
+    card.append(imageLink, body);
     eventList.append(card);
   }
 
