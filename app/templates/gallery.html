@@ -3,22 +3,22 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MotionSense Pi Archive</title>
+    <title>MotionSense Pi Gallery</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   </head>
   <body>
     <main class="shell">
       <nav class="page-nav">
         <a class="button-link" href="/">Back to Dashboard</a>
-        <a class="button-link secondary" href="/gallery">Gallery</a>
+        <a class="button-link secondary" href="/archive">Browse Archive</a>
       </nav>
 
       <section class="card">
         <div class="card-header">
           <div>
-            <p class="eyebrow">Saved Motion Captures</p>
-            <h1>Event Archive</h1>
-            <p class="subtle">Browse and move older motion captures into a separate gallery.</p>
+            <p class="eyebrow">Saved Gallery Photos</p>
+            <h1>Gallery</h1>
+            <p class="subtle">Photos moved out of the archive stay here until you download or delete them.</p>
           </div>
           <div class="actions compact">
             <button id="browser-select-button" type="button">Select All</button>
@@ -26,7 +26,7 @@
             <button id="browser-delete-button" type="button" class="danger">Delete Selected</button>
           </div>
         </div>
-        <p class="subtle archive-meta">Storage path: <code>{{ event_dir }}</code></p>
+        <p class="subtle archive-meta">Storage path: <code>{{ gallery_dir }}</code></p>
 
         <div id="browser-message" class="message" aria-live="polite"></div>
         <div id="browser-event-list" class="event-list"></div>
@@ -34,18 +34,14 @@
     </main>
     <script id="browser-events" type="application/json">{{ events | tojson }}</script>
     <script id="browser-config" type="application/json">{{ {
-      "listUrl": "/api/events",
-      "downloadUrl": "/api/events/download",
-      "deleteUrl": "/api/events/delete",
-      "moveUrl": "/api/events/move-to-gallery",
-      "emptyMessage": "No saved motion events yet.",
-      "refreshErrorMessage": "Archive refresh failed.",
+      "listUrl": "/api/gallery",
+      "downloadUrl": "/api/gallery/download",
+      "deleteUrl": "/api/gallery/delete",
+      "emptyMessage": "No gallery photos yet.",
+      "refreshErrorMessage": "Gallery refresh failed.",
       "downloadErrorMessage": "Download failed.",
       "deleteErrorMessage": "Delete failed.",
-      "deleteProgressMessage": "Deleting event photos...",
-      "moveErrorMessage": "Move failed.",
-      "moveProgressMessage": "Moving photo to gallery...",
-      "moveButtonLabel": "Move to Gallery"
+      "deleteProgressMessage": "Deleting gallery photos..."
     } | tojson }}</script>
     <script src="{{ url_for('static', filename='event-browser.js') }}"></script>
   </body>

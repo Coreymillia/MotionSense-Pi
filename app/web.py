@@ -23,6 +23,7 @@ def create_app(start_detector: bool = True) -> Flask:
     data_dir = Path(__file__).resolve().parent.parent / "data"
     snapshot_path = data_dir / "latest.jpg"
     event_dir = data_dir / "events"
+    gallery_dir = data_dir / "gallery"
 
     camera = CameraService(snapshot_path=snapshot_path)
     sense_hat = SenseHatService()
@@ -31,6 +32,7 @@ def create_app(start_detector: bool = True) -> Flask:
         camera=camera,
         sense_hat=sense_hat,
         event_dir=event_dir,
+        gallery_dir=gallery_dir,
         config_path=data_dir / "motion_config.json",
     )
     timed_capture = TimedCaptureService(
@@ -77,6 +79,14 @@ def create_app(start_detector: bool = True) -> Flask:
             "archive.html",
             events=monitor.archived_events_payload(),
             event_dir=str(event_dir),
+        )
+
+    @app.get("/gallery")
+    def gallery() -> str:
+        return render_template(
+            "gallery.html",
+            events=monitor.gallery_payload(),
+            gallery_dir=str(gallery_dir),
         )
 
     def payload_filenames() -> list[str] | tuple[dict[str, object], int]:
@@ -263,6 +273,35 @@ def create_app(start_detector: bool = True) -> Flask:
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
+    @app.post("/api/events/move-to-gallery")
+    def api_events_move_to_gallery():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            payload = monitor.move_events_to_gallery(filenames)
+            return jsonify({"ok": True, **payload})
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    def download_image_bundle(image_paths: list[Path], archive_prefix: str):
+        archive_name = datetime.now(tz=timezone.utc).strftime(
+            f"{archive_prefix}-%Y%m%dT%H%M%SZ.zip"
+        )
+        archive_buffer = BytesIO()
+        with ZipFile(archive_buffer, mode="w", compression=ZIP_DEFLATED) as archive:
+            for image_path in image_paths:
+                archive.write(image_path, arcname=image_path.name)
+        archive_buffer.seek(0)
+        return send_file(
+            archive_buffer,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=archive_name,
+            max_age=0,
+        )
+
     @app.post("/api/events/download")
     def api_events_download():
         filenames = payload_filenames()
@@ -274,23 +313,40 @@ def create_app(start_detector: bool = True) -> Flask:
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
-        archive_name = datetime.now(tz=timezone.utc).strftime("motionsense-events-%Y%m%dT%H%M%SZ.zip")
-        archive_buffer = BytesIO()
-        with ZipFile(archive_buffer, mode="w", compression=ZIP_DEFLATED) as archive:
-            for event_path in event_paths:
-                archive.write(event_path, arcname=event_path.name)
-        archive_buffer.seek(0)
-        return send_file(
-            archive_buffer,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name=archive_name,
-            max_age=0,
-        )
+        return download_image_bundle(event_paths, "motionsense-events")
 
     @app.get("/api/events")
     def api_events():
         return jsonify({"ok": True, "events": monitor.archived_events_payload()})
+
+    @app.post("/api/gallery/delete")
+    def api_gallery_delete():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            payload = monitor.delete_gallery(filenames)
+            return jsonify({"ok": True, **payload})
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/gallery/download")
+    def api_gallery_download():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            gallery_paths = monitor.selected_gallery_paths(filenames)
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        return download_image_bundle(gallery_paths, "motionsense-gallery")
+
+    @app.get("/api/gallery")
+    def api_gallery():
+        return jsonify({"ok": True, "events": monitor.gallery_payload()})
 
     @app.get("/snapshot.jpg")
     def snapshot_image():
@@ -313,5 +369,12 @@ def create_app(start_detector: bool = True) -> Flask:
         if event_file is None:
             abort(404)
         return send_jpeg(event_file)
+
+    @app.get("/gallery-images/<path:filename>")
+    def gallery_image(filename: str):
+        gallery_file = motion_detector.resolve_gallery_path(filename)
+        if gallery_file is None:
+            abort(404)
+        return send_jpeg(gallery_file)
 
     return app

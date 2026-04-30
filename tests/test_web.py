@@ -151,6 +151,30 @@ class WebTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["deleted_count"], 1)
 
+    def test_move_events_to_gallery_endpoint_returns_updated_payload(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        with patch(
+            "app.monitor.MonitorService.move_events_to_gallery",
+            return_value={
+                "moved_count": 1,
+                "moved_filenames": ["20260416T201700000000Z.jpg"],
+                "events": [],
+                "gallery": [{"event_id": "20260416T201700000000Z"}],
+                "status": {"motion_events": []},
+            },
+        ):
+            response = client.post(
+                "/api/events/move-to-gallery",
+                json={"filenames": ["20260416T201700000000Z.jpg"]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["moved_count"], 1)
+
     def test_events_endpoint_returns_archived_events(self):
         app = create_app(start_detector=False)
         client = app.test_client()
@@ -165,6 +189,21 @@ class WebTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["events"][0]["event_id"], "evt-1")
+
+    def test_gallery_endpoint_returns_gallery_items(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        with patch(
+            "app.monitor.MonitorService.gallery_payload",
+            return_value=[{"event_id": "gallery-1", "snapshot_url": "/gallery-images/gallery-1.jpg"}],
+        ):
+            response = client.get("/api/gallery")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["events"][0]["event_id"], "gallery-1")
 
     def test_events_download_endpoint_returns_zip_bundle(self):
         with TemporaryDirectory() as temp_dir:
@@ -184,6 +223,25 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.mimetype, "application/zip")
         with ZipFile(BytesIO(response.data)) as archive:
             self.assertEqual(archive.namelist(), [event_path.name])
+
+    def test_gallery_download_endpoint_returns_zip_bundle(self):
+        with TemporaryDirectory() as temp_dir:
+            gallery_path = Path(temp_dir) / "20260416T201700000000Z.jpg"
+            Image.new("RGB", (320, 240), color="orange").save(gallery_path, format="JPEG")
+
+            app = create_app(start_detector=False)
+            client = app.test_client()
+
+            with patch("app.monitor.MonitorService.selected_gallery_paths", return_value=[gallery_path]):
+                response = client.post(
+                    "/api/gallery/download",
+                    json={"filenames": [gallery_path.name]},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/zip")
+        with ZipFile(BytesIO(response.data)) as archive:
+            self.assertEqual(archive.namelist(), [gallery_path.name])
 
     def test_snapshot_endpoint_can_return_scaled_preview(self):
         with TemporaryDirectory() as temp_dir:
@@ -247,8 +305,33 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         page = response.get_data(as_text=True)
         self.assertIn("Event Archive", page)
+        self.assertIn("Gallery", page)
         self.assertIn("Download Selected", page)
         self.assertIn("Delete Selected", page)
+
+    def test_gallery_page_renders_saved_gallery_downloads(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        gallery_events = [
+            {
+                "event_id": "20260416T201700000000Z",
+                "detected_at": "2026-04-16T20:17:00+00:00",
+                "score": None,
+                "snapshot_path": "/opt/motionsense-pi/data/gallery/20260416T201700000000Z.jpg",
+                "snapshot_url": "/gallery-images/20260416T201700000000Z.jpg",
+                "size_bytes": 1024,
+            }
+        ]
+
+        with patch("app.monitor.MonitorService.gallery_payload", return_value=gallery_events):
+            response = client.get("/gallery")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Gallery", page)
+        self.assertIn("Browse Archive", page)
+        self.assertIn("Download Selected", page)
 
 
 if __name__ == "__main__":

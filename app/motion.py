@@ -33,6 +33,7 @@ class MotionDetector:
         camera: CameraService,
         sense_hat: SenseHatService,
         event_dir: Path,
+        gallery_dir: Path | None = None,
         config_path: Path | None = None,
         poll_interval_seconds: float = 3.0,
         cooldown_seconds: float = 10.0,
@@ -43,6 +44,7 @@ class MotionDetector:
         self.camera = camera
         self.sense_hat = sense_hat
         self.event_dir = event_dir
+        self.gallery_dir = gallery_dir or event_dir.parent / "gallery"
         self.config_path = config_path
         self.poll_interval_seconds = poll_interval_seconds
         self.cooldown_seconds = cooldown_seconds
@@ -51,6 +53,7 @@ class MotionDetector:
         self.min_free_space_bytes = min_free_space_bytes
 
         self.event_dir.mkdir(parents=True, exist_ok=True)
+        self.gallery_dir.mkdir(parents=True, exist_ok=True)
 
         self._events: deque[MotionEventRecord] = deque(maxlen=max_events)
         self._lock = Lock()
@@ -189,17 +192,18 @@ class MotionDetector:
             return [asdict(event) for event in reversed(self._events)]
 
     def archived_events_payload(self, limit: int | None = None) -> list[dict[str, Any]]:
-        event_paths = sorted(
-            (
-                path
-                for path in self.event_dir.glob("*.jpg")
-                if path.is_file() and path.name != self._probe_path.name
-            ),
-            reverse=True,
+        return self._records_payload_for_directory(
+            directory=self.event_dir,
+            url_prefix="/events",
+            limit=limit,
         )
-        if limit is not None:
-            event_paths = event_paths[: max(limit, 0)]
-        return [asdict(self._event_record_for_path(path)) for path in event_paths]
+
+    def gallery_payload(self, limit: int | None = None) -> list[dict[str, Any]]:
+        return self._records_payload_for_directory(
+            directory=self.gallery_dir,
+            url_prefix="/gallery-images",
+            limit=limit,
+        )
 
     def archived_event_count(self) -> int:
         return sum(
@@ -209,22 +213,57 @@ class MotionDetector:
         )
 
     def selected_event_paths(self, filenames: list[str]) -> list[Path]:
+        return self._selected_image_paths(
+            directory=self.event_dir,
+            filenames=filenames,
+            image_label="event image",
+        )
+
+    def selected_gallery_paths(self, filenames: list[str]) -> list[Path]:
+        return self._selected_image_paths(
+            directory=self.gallery_dir,
+            filenames=filenames,
+            image_label="gallery image",
+        )
+
+    def delete_gallery(self, filenames: list[str]) -> list[str]:
+        gallery_paths = self.selected_gallery_paths(filenames)
+        deleted_filenames: list[str] = []
+        for gallery_path in gallery_paths:
+            gallery_path.unlink()
+            self._metadata_path_for_event(gallery_path).unlink(missing_ok=True)
+            deleted_filenames.append(gallery_path.name)
+        return deleted_filenames
+
+    def move_events_to_gallery(self, filenames: list[str]) -> list[str]:
         if not filenames:
             raise RuntimeError("Select at least one event image.")
 
-        selected_paths: list[Path] = []
-        seen_names: set[str] = set()
-        for filename in filenames:
-            if not isinstance(filename, str) or not filename:
-                raise RuntimeError("Each selected event image must have a valid filename.")
-            if filename in seen_names:
-                continue
-            event_path = self.resolve_event_path(filename)
-            if event_path is None:
-                raise RuntimeError(f"Event image '{filename}' was not found.")
-            seen_names.add(filename)
-            selected_paths.append(event_path)
-        return selected_paths
+        event_paths = self.selected_event_paths(filenames)
+        moved_filenames: list[str] = []
+        for event_path in event_paths:
+            gallery_path = self.gallery_dir / event_path.name
+            if gallery_path.exists():
+                raise RuntimeError(f"Gallery image '{event_path.name}' already exists.")
+
+            event_metadata_path = self._metadata_path_for_event(event_path)
+            gallery_metadata_path = self._metadata_path_for_event(gallery_path)
+            event_path.replace(gallery_path)
+            if event_metadata_path.exists():
+                event_metadata_path.replace(gallery_metadata_path)
+            moved_filenames.append(gallery_path.name)
+
+        moved_names = set(moved_filenames)
+        with self._lock:
+            self._events = deque(
+                (
+                    event
+                    for event in self._events
+                    if Path(event.snapshot_path).name not in moved_names
+                ),
+                maxlen=self.max_events,
+            )
+        return moved_filenames
 
     def delete_events(self, filenames: list[str]) -> list[str]:
         event_paths = self.selected_event_paths(filenames)
@@ -247,14 +286,61 @@ class MotionDetector:
         return deleted_filenames
 
     def resolve_event_path(self, filename: str) -> Path | None:
-        candidate = (self.event_dir / filename).resolve()
+        return self._resolve_image_path(self.event_dir, filename)
+
+    def resolve_gallery_path(self, filename: str) -> Path | None:
+        return self._resolve_image_path(self.gallery_dir, filename)
+
+    def _resolve_image_path(self, directory: Path, filename: str) -> Path | None:
+        candidate = (directory / filename).resolve()
         try:
-            candidate.relative_to(self.event_dir.resolve())
+            candidate.relative_to(directory.resolve())
         except ValueError:
             return None
         if not candidate.exists() or not candidate.is_file():
             return None
         return candidate
+
+    def _records_payload_for_directory(
+        self,
+        directory: Path,
+        url_prefix: str,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        image_paths = sorted(self._image_paths_for_directory(directory), reverse=True)
+        if limit is not None:
+            image_paths = image_paths[: max(limit, 0)]
+        return [asdict(self._event_record_for_path(path, url_prefix=url_prefix)) for path in image_paths]
+
+    def _image_paths_for_directory(self, directory: Path) -> list[Path]:
+        return [
+            path
+            for path in directory.glob("*.jpg")
+            if path.is_file() and path.name != self._probe_path.name
+        ]
+
+    def _selected_image_paths(
+        self,
+        directory: Path,
+        filenames: list[str],
+        image_label: str,
+    ) -> list[Path]:
+        if not filenames:
+            raise RuntimeError(f"Select at least one {image_label}.")
+
+        selected_paths: list[Path] = []
+        seen_names: set[str] = set()
+        for filename in filenames:
+            if not isinstance(filename, str) or not filename:
+                raise RuntimeError(f"Each selected {image_label} must have a valid filename.")
+            if filename in seen_names:
+                continue
+            image_path = self._resolve_image_path(directory, filename)
+            if image_path is None:
+                raise RuntimeError(f"{image_label.capitalize()} '{filename}' was not found.")
+            seen_names.add(filename)
+            selected_paths.append(image_path)
+        return selected_paths
 
     def _metadata_path_for_event(self, path: Path) -> Path:
         return path.with_suffix(".json")
@@ -300,6 +386,7 @@ class MotionDetector:
         path: Path,
         score: float | None = None,
         source: str = "motion",
+        url_prefix: str = "/events",
     ) -> MotionEventRecord:
         metadata = self._load_event_metadata(path)
         detected_at = metadata.get("detected_at")
@@ -320,17 +407,13 @@ class MotionDetector:
             source=source,
             score=round(score, 2) if score is not None else None,
             snapshot_path=str(path),
-            snapshot_url=f"/events/{path.name}",
+            snapshot_url=f"{url_prefix}/{path.name}",
             size_bytes=path.stat().st_size,
         )
 
     def _event_image_paths_oldest_first(self) -> list[Path]:
         return sorted(
-            (
-                path
-                for path in self.event_dir.glob("*.jpg")
-                if path.is_file() and path.name != self._probe_path.name
-            ),
+            self._image_paths_for_directory(self.event_dir),
             key=lambda path: path.stat().st_mtime,
         )
 
@@ -383,7 +466,12 @@ class MotionDetector:
             self._write_event_metadata(event_path, detected_at, source, score)
             event_details = self.camera.details_for_path(event_path)
 
-            event = self._event_record_for_path(event_path, score=score, source=source)
+            event = self._event_record_for_path(
+                event_path,
+                score=score,
+                source=source,
+                url_prefix="/events",
+            )
             events.append(
                 MotionEventRecord(
                     event_id=event.event_id,

@@ -89,8 +89,10 @@ The browser dashboard supports:
   - left arrow for previous image
   - right arrow for next image
   - escape to close
+- a fullscreen **Move to Gallery** action for archived photos
 - per-image and bulk delete/download controls for motion event images
 - a full browser archive page for older saved event images
+- a separate browser gallery page for photos moved out of the archive
 - Sense HAT telemetry
 
 ### ESP32-CAM firmware
@@ -132,8 +134,11 @@ Key endpoints used by the browser UI and CYD:
 - `POST /api/camera/network`
 - `POST /api/camera/rotate`
 - `GET /api/events`
+- `POST /api/events/move-to-gallery`
+- `GET /api/gallery`
 - `GET /snapshot.jpg`
 - `GET /events/<filename>`
+- `GET /gallery-images/<filename>`
 
 ## Project layout
 
@@ -197,8 +202,10 @@ The installer:
 ## Storage and retention
 
 - motion and timed-capture images are stored on disk in `data/events`
+- moved gallery images are stored separately in `data/gallery`
 - the latest snapshot is stored separately as `data/latest.jpg`
 - the dashboard recent-events strip and archive both read from the saved event files
+- moved photos are removed from the archive list so they only appear in the gallery
 - MotionSense Pi now keeps capturing until free space drops below a safety floor
 - when free space falls under **5 GB**, the app deletes the **oldest saved event photos first** so the Pi can keep saving new events without filling the filesystem
 

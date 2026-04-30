@@ -90,6 +90,11 @@ class MonitorService:
             return []
         return self.motion_detector.archived_events_payload(limit=limit)
 
+    def gallery_payload(self, limit: int | None = None) -> list[dict[str, object]]:
+        if self.motion_detector is None:
+            return []
+        return self.motion_detector.gallery_payload(limit=limit)
+
     def start_motion_detection(self) -> dict[str, object]:
         if self.motion_detector is None:
             raise RuntimeError("Motion detection is not configured.")
@@ -191,7 +196,36 @@ class MonitorService:
             "status": self.status_payload(),
         }
 
+    def move_events_to_gallery(self, filenames: list[str]) -> dict[str, object]:
+        if self.motion_detector is None:
+            raise RuntimeError("Motion detection is not configured.")
+
+        moved_filenames = self.motion_detector.move_events_to_gallery(filenames)
+        return {
+            "moved_count": len(moved_filenames),
+            "moved_filenames": moved_filenames,
+            "events": self.archived_events_payload(),
+            "gallery": self.gallery_payload(),
+            "status": self.status_payload(),
+        }
+
     def selected_event_paths(self, filenames: list[str]) -> list[Path]:
         if self.motion_detector is None:
             raise RuntimeError("Motion detection is not configured.")
         return self.motion_detector.selected_event_paths(filenames)
+
+    def delete_gallery(self, filenames: list[str]) -> dict[str, object]:
+        if self.motion_detector is None:
+            raise RuntimeError("Motion detection is not configured.")
+
+        deleted_filenames = self.motion_detector.delete_gallery(filenames)
+        return {
+            "deleted_count": len(deleted_filenames),
+            "deleted_filenames": deleted_filenames,
+            "gallery": self.gallery_payload(),
+        }
+
+    def selected_gallery_paths(self, filenames: list[str]) -> list[Path]:
+        if self.motion_detector is None:
+            raise RuntimeError("Motion detection is not configured.")
+        return self.motion_detector.selected_gallery_paths(filenames)

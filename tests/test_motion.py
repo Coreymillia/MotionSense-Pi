@@ -116,6 +116,30 @@ class MotionDetectorTests(unittest.TestCase):
             self.assertEqual(events[0]["source"], "motion")
             self.assertIsNone(events[0]["score"])
 
+    def test_gallery_payload_lists_moved_images(self):
+        with TemporaryDirectory() as temp_dir:
+            gallery_dir = Path(temp_dir) / "gallery"
+            gallery_dir.mkdir(parents=True, exist_ok=True)
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+                gallery_dir=gallery_dir,
+            )
+
+            Image.new("RGB", (320, 240), color="gold").save(
+                gallery_dir / "20260416T201700000000Z.jpg", format="JPEG"
+            )
+
+            events = detector.gallery_payload()
+
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event_id"], "20260416T201700000000Z")
+            self.assertEqual(
+                events[0]["snapshot_url"],
+                "/gallery-images/20260416T201700000000Z.jpg",
+            )
+
     def test_status_payload_event_count_uses_saved_images(self):
         with TemporaryDirectory() as temp_dir:
             event_dir = Path(temp_dir) / "events"
@@ -269,6 +293,59 @@ class MotionDetectorTests(unittest.TestCase):
             self.assertEqual(deleted, [second_event.name])
             self.assertFalse(second_event.exists())
             self.assertTrue(first_event.exists())
+
+    def test_move_events_to_gallery_moves_selected_files(self):
+        with TemporaryDirectory() as temp_dir:
+            event_dir = Path(temp_dir) / "events"
+            gallery_dir = Path(temp_dir) / "gallery"
+            event_dir.mkdir(parents=True, exist_ok=True)
+            gallery_dir.mkdir(parents=True, exist_ok=True)
+            event_path = event_dir / "20260416T201700000000Z.jpg"
+            Image.new("RGB", (320, 240), color="blue").save(event_path, format="JPEG")
+            metadata_path = event_path.with_suffix(".json")
+            metadata_path.write_text(
+                '{"detected_at":"2026-04-16T20:17:00+00:00","source":"motion","score":22.5}',
+                encoding="utf-8",
+            )
+
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=event_dir,
+                gallery_dir=gallery_dir,
+            )
+
+            moved = detector.move_events_to_gallery([event_path.name])
+
+            self.assertEqual(moved, [event_path.name])
+            self.assertFalse(event_path.exists())
+            self.assertFalse(metadata_path.exists())
+            self.assertTrue((gallery_dir / event_path.name).exists())
+            self.assertTrue((gallery_dir / "20260416T201700000000Z.json").exists())
+            self.assertEqual(detector.archived_events_payload(), [])
+            self.assertEqual(detector.gallery_payload()[0]["snapshot_url"], f"/gallery-images/{event_path.name}")
+
+    def test_delete_gallery_removes_selected_files(self):
+        with TemporaryDirectory() as temp_dir:
+            gallery_dir = Path(temp_dir) / "gallery"
+            gallery_dir.mkdir(parents=True, exist_ok=True)
+            first_image = gallery_dir / "20260416T201500000000Z.jpg"
+            second_image = gallery_dir / "20260416T201700000000Z.jpg"
+            Image.new("RGB", (320, 240), color="red").save(first_image, format="JPEG")
+            Image.new("RGB", (320, 240), color="blue").save(second_image, format="JPEG")
+
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=Path(temp_dir) / "events",
+                gallery_dir=gallery_dir,
+            )
+
+            deleted = detector.delete_gallery([second_image.name])
+
+            self.assertEqual(deleted, [second_image.name])
+            self.assertFalse(second_image.exists())
+            self.assertTrue(first_image.exists())
 
 
 if __name__ == "__main__":
