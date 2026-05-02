@@ -8,13 +8,22 @@ const networkCameraUrl = document.getElementById("network-camera-url");
 const networkCameraButton = document.getElementById("network-camera-button");
 const captureResolution = document.getElementById("capture-resolution");
 const captureLighting = document.getElementById("capture-lighting");
+const captureWhiteBalance = document.getElementById("capture-white-balance");
+const captureDenoise = document.getElementById("capture-denoise");
+const captureBrightness = document.getElementById("capture-brightness");
+const captureContrast = document.getElementById("capture-contrast");
+const captureSaturation = document.getElementById("capture-saturation");
+const captureSharpness = document.getElementById("capture-sharpness");
 const motionPollInterval = document.getElementById("motion-poll-interval");
 const motionCooldown = document.getElementById("motion-cooldown");
 const motionThreshold = document.getElementById("motion-threshold");
 const captureBurstCount = document.getElementById("capture-burst-count");
 const settingsButton = document.getElementById("settings-button");
+const timerMode = document.getElementById("timer-mode");
 const timerIntervalValue = document.getElementById("timer-interval-value");
 const timerIntervalUnit = document.getElementById("timer-interval-unit");
+const timerDurationValue = document.getElementById("timer-duration-value");
+const timerDurationUnit = document.getElementById("timer-duration-unit");
 const timerStartButton = document.getElementById("timer-start-button");
 const timerStopButton = document.getElementById("timer-stop-button");
 const rotateButton = document.getElementById("rotate-button");
@@ -25,6 +34,8 @@ const snapshotImage = document.getElementById("snapshot-image");
 const snapshotEmpty = document.getElementById("snapshot-empty");
 const snapshotMeta = document.getElementById("snapshot-meta");
 const cameraLightingNote = document.getElementById("camera-lighting-note");
+const cameraTuningNote = document.getElementById("camera-tuning-note");
+const timerModeNote = document.getElementById("timer-mode-note");
 const senseHatPanel = document.getElementById("sensehat-panel");
 const timerPanel = document.getElementById("timer-panel");
 const motionPanel = document.getElementById("motion-panel");
@@ -161,6 +172,18 @@ function renderSenseHat(data) {
 
 function renderCamera(data) {
   const lighting = data.lighting || { mode: "auto", supported: false, options: [] };
+  const tuning = data.tuning || {
+    supported: false,
+    white_balance_mode: "auto",
+    brightness: 0,
+    contrast: 1,
+    saturation: 1,
+    sharpness: 1,
+    denoise_mode: "auto",
+    white_balance_options: [],
+    denoise_options: [],
+    ranges: {},
+  };
   document.getElementById("camera-available").textContent = data.available ? "Yes" : "No";
   document.getElementById("camera-source-name").textContent = data.active_source_name || "Unavailable";
   document.getElementById("camera-backend").textContent = data.backend || "Unavailable";
@@ -188,6 +211,8 @@ function renderCamera(data) {
   captureBurstCount.value = `${data.burst_count || 1}`;
   captureResolution.innerHTML = "";
   captureLighting.innerHTML = "";
+  captureWhiteBalance.innerHTML = "";
+  captureDenoise.innerHTML = "";
   for (const option of data.resolution.options || []) {
     const selectOption = document.createElement("option");
     selectOption.value = `${option.width}x${option.height}`;
@@ -203,9 +228,53 @@ function renderCamera(data) {
     selectOption.selected = option.mode === lighting.mode;
     captureLighting.append(selectOption);
   }
+  for (const option of tuning.white_balance_options || []) {
+    const selectOption = document.createElement("option");
+    selectOption.value = option.value;
+    selectOption.textContent = option.label;
+    selectOption.selected = option.value === tuning.white_balance_mode;
+    captureWhiteBalance.append(selectOption);
+  }
+  for (const option of tuning.denoise_options || []) {
+    const selectOption = document.createElement("option");
+    selectOption.value = option.value;
+    selectOption.textContent = option.label;
+    selectOption.selected = option.value === tuning.denoise_mode;
+    captureDenoise.append(selectOption);
+  }
+  captureBrightness.value = `${tuning.brightness}`;
+  captureContrast.value = `${tuning.contrast}`;
+  captureSaturation.value = `${tuning.saturation}`;
+  captureSharpness.value = `${tuning.sharpness}`;
+  for (const [input, range] of [
+    [captureBrightness, tuning.ranges?.brightness],
+    [captureContrast, tuning.ranges?.contrast],
+    [captureSaturation, tuning.ranges?.saturation],
+    [captureSharpness, tuning.ranges?.sharpness],
+  ]) {
+    if (!range) {
+      continue;
+    }
+    input.min = `${range.min}`;
+    input.max = `${range.max}`;
+    input.step = `${range.step}`;
+  }
+  for (const control of [
+    captureWhiteBalance,
+    captureDenoise,
+    captureBrightness,
+    captureContrast,
+    captureSaturation,
+    captureSharpness,
+  ]) {
+    control.disabled = !tuning.supported;
+  }
   cameraLightingNote.textContent = lighting.supported
     ? "Lighting presets are active for the Pi Camera."
     : "Lighting presets are saved, but only apply when the Pi Camera is active.";
+  cameraTuningNote.textContent = tuning.supported
+    ? "Direct Pi Camera tuning is active. Lower brightness or switch white balance when bright sunlight shifts the color."
+    : "Direct Pi Camera tuning is saved, but only applies when the Pi Camera is active.";
 }
 
 function renderMotion(data) {
@@ -254,11 +323,29 @@ function timerInputsFromSeconds(intervalSeconds) {
   };
 }
 
+function secondsFromValueUnit(value, unit) {
+  return unit === "minutes" ? value * 60 : value;
+}
+
+function syncTimerModeInputs() {
+  const comboMode = timerMode.value === "combo";
+  timerDurationValue.disabled = !comboMode;
+  timerDurationUnit.disabled = !comboMode;
+  timerModeNote.textContent = comboMode
+    ? "Motion + Timer waits for movement, then captures every interval for the selected duration. The interval must be at least 7 seconds."
+    : "Timer captures immediately on a fixed schedule using the selected interval.";
+}
+
 function renderTimer(data) {
   timerPanel.innerHTML = "";
 
   if (!data) {
     addDefinitionRow(timerPanel, "Available", "No");
+    timerMode.disabled = true;
+    timerIntervalValue.disabled = true;
+    timerIntervalUnit.disabled = true;
+    timerDurationValue.disabled = true;
+    timerDurationUnit.disabled = true;
     timerStartButton.disabled = true;
     timerStopButton.disabled = true;
     return;
@@ -266,14 +353,26 @@ function renderTimer(data) {
 
   addDefinitionRow(timerPanel, "Armed", data.armed ? "Yes" : "No");
   addDefinitionRow(timerPanel, "Running", data.running ? "Yes" : "No");
+  addDefinitionRow(timerPanel, "Mode", data.mode === "combo" ? "Motion + Timer" : "Timer");
   addDefinitionRow(timerPanel, "Interval", `${data.interval_seconds}s`);
+  addDefinitionRow(timerPanel, "Duration", `${data.duration_seconds}s`);
+  addDefinitionRow(timerPanel, "Waiting for Motion", data.waiting_for_motion ? "Yes" : "No");
   addDefinitionRow(timerPanel, "Captured", `${data.capture_count}`);
   addDefinitionRow(timerPanel, "Last Capture", data.last_capture_at || "None yet");
+  addDefinitionRow(timerPanel, "Last Trigger", data.last_motion_at || "No motion trigger yet");
   addDefinitionRow(timerPanel, "Timer Error", data.last_error || "None");
 
   const timerInputs = timerInputsFromSeconds(data.interval_seconds);
   timerIntervalValue.value = `${timerInputs.value}`;
   timerIntervalUnit.value = timerInputs.unit;
+  const durationInputs = timerInputsFromSeconds(data.duration_seconds);
+  timerDurationValue.value = `${durationInputs.value}`;
+  timerDurationUnit.value = durationInputs.unit;
+  timerMode.value = data.mode || "timer";
+  timerMode.disabled = false;
+  timerIntervalValue.disabled = false;
+  timerIntervalUnit.disabled = false;
+  syncTimerModeInputs();
   timerStartButton.disabled = data.armed;
   timerStopButton.disabled = !data.armed;
 }
@@ -355,7 +454,13 @@ function renderEvents(events) {
     badge.className = "badge";
     badge.textContent =
       event.score === null
-        ? `${event.source === "timer" ? "Timed" : "Saved"} capture`
+        ? `${
+            event.source === "timer"
+              ? "Timed"
+              : event.source === "combo"
+                ? "Combo"
+                : "Saved"
+          } capture`
         : `Score ${event.score}`;
 
     const actions = document.createElement("div");
@@ -519,11 +624,37 @@ async function saveSettings() {
     message.textContent = "Choose a burst count between 1 and 5.";
     return;
   }
+  const brightness = Number.parseFloat(captureBrightness.value);
+  const contrast = Number.parseFloat(captureContrast.value);
+  const saturation = Number.parseFloat(captureSaturation.value);
+  const sharpness = Number.parseFloat(captureSharpness.value);
+  if (Number.isNaN(brightness)) {
+    message.textContent = "Enter a brightness value in the allowed range.";
+    return;
+  }
+  if (Number.isNaN(contrast)) {
+    message.textContent = "Enter a contrast value in the allowed range.";
+    return;
+  }
+  if (Number.isNaN(saturation)) {
+    message.textContent = "Enter a saturation value in the allowed range.";
+    return;
+  }
+  if (Number.isNaN(sharpness)) {
+    message.textContent = "Enter a sharpness value in the allowed range.";
+    return;
+  }
 
   const body = {
     burst_count: burstCount,
     resolution: captureResolution.value,
     lighting_mode: captureLighting.value,
+    white_balance_mode: captureWhiteBalance.value,
+    brightness,
+    contrast,
+    saturation,
+    sharpness,
+    denoise_mode: captureDenoise.value,
   };
 
   if (!motionPollInterval.disabled) {
@@ -574,47 +705,59 @@ async function startTimer() {
     message.textContent = "Enter a timer interval of at least 1.";
     return;
   }
+  const durationValue = Number.parseInt(timerDurationValue.value, 10);
+  if (Number.isNaN(durationValue) || durationValue < 1) {
+    message.textContent = "Enter an auto capture duration of at least 1.";
+    return;
+  }
 
-  const intervalSeconds =
-    timerIntervalUnit.value === "minutes"
-      ? intervalValue * 60
-      : intervalValue;
+  const intervalSeconds = secondsFromValueUnit(intervalValue, timerIntervalUnit.value);
+  const durationSeconds = secondsFromValueUnit(durationValue, timerDurationUnit.value);
+  if (timerMode.value === "combo" && intervalSeconds < 7) {
+    message.textContent = "Motion + Timer needs an interval of at least 7 seconds.";
+    return;
+  }
 
-  message.textContent = "Starting timed capture...";
+  message.textContent = "Starting auto capture...";
   timerStartButton.disabled = true;
   const response = await fetch("/api/timer/start", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ interval_seconds: intervalSeconds }),
+    body: JSON.stringify({
+      interval_seconds: intervalSeconds,
+      duration_seconds: durationSeconds,
+      mode: timerMode.value,
+    }),
   });
   const payload = await response.json();
   timerStartButton.disabled = false;
 
   if (!response.ok) {
-    message.textContent = payload.error || "Timed capture failed to start.";
+    message.textContent = payload.error || "Auto capture failed to start.";
     return;
   }
 
   renderStatus(payload.status);
-  message.textContent = "Timed capture started.";
+  message.textContent =
+    timerMode.value === "combo" ? "Motion + Timer started." : "Timer capture started.";
 }
 
 async function stopTimer() {
-  message.textContent = "Stopping timed capture...";
+  message.textContent = "Stopping auto capture...";
   timerStopButton.disabled = true;
   const response = await fetch("/api/timer/stop", { method: "POST" });
   const payload = await response.json();
   timerStopButton.disabled = false;
 
   if (!response.ok) {
-    message.textContent = payload.error || "Timed capture failed to stop.";
+    message.textContent = payload.error || "Auto capture failed to stop.";
     return;
   }
 
   renderStatus(payload.status);
-  message.textContent = "Timed capture stopped.";
+  message.textContent = "Auto capture stopped.";
 }
 
 function updateEventActionButtons() {
@@ -705,6 +848,7 @@ timerStartButton.addEventListener("click", () => {
 timerStopButton.addEventListener("click", () => {
   void stopTimer();
 });
+timerMode.addEventListener("change", syncTimerModeInputs);
 
 rotateButton.addEventListener("click", () => {
   void rotateCamera();

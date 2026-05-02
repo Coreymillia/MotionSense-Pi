@@ -68,7 +68,7 @@ Pi Camera / USB Webcam / ESP32-CAM
 The browser dashboard supports:
 
 - manual snapshot capture
-- timed capture start/stop with second or minute intervals
+- auto capture start/stop in either timer mode or motion-triggered combo mode
 - configurable motion poll interval
 - configurable motion cooldown and threshold
 - configurable 1-5 photo burst capture for manual and motion-triggered snapshots

@@ -48,6 +48,7 @@ class MonitorService:
                 "burst_count": self.camera.burst_count(),
                 "rotation_degrees": self.camera.rotation_degrees(),
                 "lighting": self.camera.lighting_payload(),
+                "tuning": self.camera.tuning_payload(),
                 "target": self.camera.active_capture_target(),
                 "sources": self.camera.list_sources(),
                 "resolution": self.camera.resolution_payload(),
@@ -134,6 +135,12 @@ class MonitorService:
         burst_count: int | None = None,
         resolution: tuple[int, int] | None = None,
         lighting_mode: str | None = None,
+        white_balance_mode: str | None = None,
+        brightness: float | None = None,
+        contrast: float | None = None,
+        saturation: float | None = None,
+        sharpness: float | None = None,
+        denoise_mode: str | None = None,
         cooldown_seconds: float | None = None,
         motion_threshold: float | None = None,
     ) -> dict[str, object]:
@@ -142,6 +149,12 @@ class MonitorService:
             and burst_count is None
             and resolution is None
             and lighting_mode is None
+            and white_balance_mode is None
+            and brightness is None
+            and contrast is None
+            and saturation is None
+            and sharpness is None
+            and denoise_mode is None
             and cooldown_seconds is None
             and motion_threshold is None
         ):
@@ -169,13 +182,34 @@ class MonitorService:
 
         if lighting_mode is not None:
             self.camera.set_lighting_mode(lighting_mode)
+        if white_balance_mode is not None:
+            self.camera.set_white_balance_mode(white_balance_mode)
+        if brightness is not None:
+            self.camera.set_brightness(brightness)
+        if contrast is not None:
+            self.camera.set_contrast(contrast)
+        if saturation is not None:
+            self.camera.set_saturation(saturation)
+        if sharpness is not None:
+            self.camera.set_sharpness(sharpness)
+        if denoise_mode is not None:
+            self.camera.set_denoise_mode(denoise_mode)
 
         return self.status_payload()
 
-    def start_timed_capture(self, interval_seconds: int) -> dict[str, object]:
+    def start_timed_capture(
+        self,
+        interval_seconds: int,
+        mode: str | None = None,
+        duration_seconds: int | None = None,
+    ) -> dict[str, object]:
         if self.timed_capture is None:
             raise RuntimeError("Timed capture is not configured.")
-        self.timed_capture.start(interval_seconds=interval_seconds)
+        self.timed_capture.start(
+            interval_seconds=interval_seconds,
+            mode=mode,
+            duration_seconds=duration_seconds,
+        )
         return self.status_payload()
 
     def stop_timed_capture(self) -> dict[str, object]:

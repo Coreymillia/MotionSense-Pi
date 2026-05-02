@@ -65,6 +65,12 @@ class LightingProfile:
     denoise: str
 
 
+@dataclass(frozen=True)
+class CameraTuningOption:
+    value: str
+    label: str
+
+
 class CameraService:
     LIGHTING_PROFILES: tuple[LightingProfile, ...] = (
         LightingProfile(
@@ -123,6 +129,25 @@ class CameraService:
             denoise="cdn_hq",
         ),
     )
+    WHITE_BALANCE_OPTIONS: tuple[CameraTuningOption, ...] = (
+        CameraTuningOption(value="auto", label="Auto"),
+        CameraTuningOption(value="daylight", label="Daylight"),
+        CameraTuningOption(value="cloudy", label="Cloudy"),
+        CameraTuningOption(value="indoor", label="Indoor"),
+        CameraTuningOption(value="fluorescent", label="Fluorescent"),
+        CameraTuningOption(value="incandescent", label="Incandescent"),
+        CameraTuningOption(value="tungsten", label="Tungsten"),
+    )
+    DENOISE_OPTIONS: tuple[CameraTuningOption, ...] = (
+        CameraTuningOption(value="auto", label="Auto"),
+        CameraTuningOption(value="off", label="Off"),
+        CameraTuningOption(value="cdn_fast", label="Fast"),
+        CameraTuningOption(value="cdn_hq", label="High Quality"),
+    )
+    BRIGHTNESS_RANGE = {"min": -1.0, "max": 1.0, "step": 0.05}
+    CONTRAST_RANGE = {"min": 0.0, "max": 4.0, "step": 0.05}
+    SATURATION_RANGE = {"min": 0.0, "max": 4.0, "step": 0.05}
+    SHARPNESS_RANGE = {"min": 0.0, "max": 4.0, "step": 0.05}
 
     def __init__(
         self,
@@ -145,6 +170,13 @@ class CameraService:
         self._burst_count = 1
         self._rotation_degrees = 0
         self._lighting_mode = "auto"
+        default_profile = self._lighting_profiles_by_mode()[self._lighting_mode]
+        self._white_balance_mode = default_profile.awb
+        self._brightness = default_profile.brightness
+        self._contrast = default_profile.contrast
+        self._saturation = 1.0
+        self._sharpness = 1.0
+        self._denoise_mode = default_profile.denoise
         self._resolution_options: tuple[ResolutionOption, ...] | None = None
         self._source_cache_ttl_seconds = 5.0
         self._source_cache_at = 0.0
@@ -190,6 +222,42 @@ class CameraService:
             )
         except RuntimeError:
             self._lighting_mode = "auto"
+        self._apply_lighting_profile(self._lighting_profiles_by_mode()[self._lighting_mode])
+
+        try:
+            self._white_balance_mode = self._normalize_white_balance_mode(
+                config.get("white_balance_mode", self._white_balance_mode)
+            )
+        except RuntimeError:
+            pass
+        try:
+            self._brightness = self._normalize_brightness(
+                config.get("brightness", self._brightness)
+            )
+        except RuntimeError:
+            pass
+        try:
+            self._contrast = self._normalize_contrast(config.get("contrast", self._contrast))
+        except RuntimeError:
+            pass
+        try:
+            self._saturation = self._normalize_saturation(
+                config.get("saturation", self._saturation)
+            )
+        except RuntimeError:
+            pass
+        try:
+            self._sharpness = self._normalize_sharpness(
+                config.get("sharpness", self._sharpness)
+            )
+        except RuntimeError:
+            pass
+        try:
+            self._denoise_mode = self._normalize_denoise_mode(
+                config.get("denoise_mode", self._denoise_mode)
+            )
+        except RuntimeError:
+            pass
 
         try:
             self.width, self.height = self._normalize_resolution(
@@ -209,6 +277,12 @@ class CameraService:
             "burst_count": self._burst_count,
             "rotation_degrees": self._rotation_degrees,
             "lighting_mode": self._lighting_mode,
+            "white_balance_mode": self._white_balance_mode,
+            "brightness": self._brightness,
+            "contrast": self._contrast,
+            "saturation": self._saturation,
+            "sharpness": self._sharpness,
+            "denoise_mode": self._denoise_mode,
             "width": self.width,
             "height": self.height,
         }
@@ -282,11 +356,121 @@ class CameraService:
             raise RuntimeError("Lighting mode must be one of the supported presets.")
         return normalized
 
+    @staticmethod
+    def _white_balance_options_by_value() -> dict[str, CameraTuningOption]:
+        return {
+            option.value: option for option in CameraService.WHITE_BALANCE_OPTIONS
+        }
+
+    @classmethod
+    def _normalize_white_balance_mode(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise RuntimeError("White balance mode must be one of the supported options.")
+        normalized = value.strip().lower()
+        if normalized not in cls._white_balance_options_by_value():
+            raise RuntimeError("White balance mode must be one of the supported options.")
+        return normalized
+
+    @staticmethod
+    def _denoise_options_by_value() -> dict[str, CameraTuningOption]:
+        return {option.value: option for option in CameraService.DENOISE_OPTIONS}
+
+    @classmethod
+    def _normalize_denoise_mode(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise RuntimeError("Denoise mode must be one of the supported options.")
+        normalized = value.strip().lower()
+        if normalized not in cls._denoise_options_by_value():
+            raise RuntimeError("Denoise mode must be one of the supported options.")
+        return normalized
+
+    @staticmethod
+    def _normalize_numeric_setting(
+        value: object,
+        *,
+        minimum: float,
+        maximum: float,
+        label: str,
+    ) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError(f"{label} must be a number between {minimum} and {maximum}.")
+        normalized = float(value)
+        if normalized < minimum or normalized > maximum:
+            raise RuntimeError(f"{label} must be between {minimum} and {maximum}.")
+        return normalized
+
+    @classmethod
+    def _normalize_brightness(cls, value: object) -> float:
+        return cls._normalize_numeric_setting(
+            value,
+            minimum=cls.BRIGHTNESS_RANGE["min"],
+            maximum=cls.BRIGHTNESS_RANGE["max"],
+            label="Brightness",
+        )
+
+    @classmethod
+    def _normalize_contrast(cls, value: object) -> float:
+        return cls._normalize_numeric_setting(
+            value,
+            minimum=cls.CONTRAST_RANGE["min"],
+            maximum=cls.CONTRAST_RANGE["max"],
+            label="Contrast",
+        )
+
+    @classmethod
+    def _normalize_saturation(cls, value: object) -> float:
+        return cls._normalize_numeric_setting(
+            value,
+            minimum=cls.SATURATION_RANGE["min"],
+            maximum=cls.SATURATION_RANGE["max"],
+            label="Saturation",
+        )
+
+    @classmethod
+    def _normalize_sharpness(cls, value: object) -> float:
+        return cls._normalize_numeric_setting(
+            value,
+            minimum=cls.SHARPNESS_RANGE["min"],
+            maximum=cls.SHARPNESS_RANGE["max"],
+            label="Sharpness",
+        )
+
+    def _apply_lighting_profile(self, profile: LightingProfile) -> None:
+        self._white_balance_mode = profile.awb
+        self._brightness = profile.brightness
+        self._contrast = profile.contrast
+        self._denoise_mode = profile.denoise
+
     def lighting_mode(self) -> str:
         return self._lighting_mode
 
     def set_lighting_mode(self, value: str) -> None:
         self._lighting_mode = self._normalize_lighting_mode(value)
+        self._apply_lighting_profile(self._lighting_profiles_by_mode()[self._lighting_mode])
+        self._save_config()
+
+    def set_white_balance_mode(self, value: str) -> None:
+        self._white_balance_mode = self._normalize_white_balance_mode(value)
+        self._save_config()
+
+    def set_brightness(self, value: float) -> None:
+        self._brightness = self._normalize_brightness(value)
+        self._save_config()
+
+    def set_contrast(self, value: float) -> None:
+        self._contrast = self._normalize_contrast(value)
+        self._save_config()
+
+    def set_saturation(self, value: float) -> None:
+        self._saturation = self._normalize_saturation(value)
+        self._save_config()
+
+    def set_sharpness(self, value: float) -> None:
+        self._sharpness = self._normalize_sharpness(value)
+        self._save_config()
+
+    def set_denoise_mode(self, value: str) -> None:
+        self._denoise_mode = self._normalize_denoise_mode(value)
         self._save_config()
 
     def lighting_payload(self) -> dict[str, Any]:
@@ -304,6 +488,28 @@ class CameraService:
                 )
                 for profile in self.LIGHTING_PROFILES
             ],
+        }
+
+    def tuning_payload(self) -> dict[str, Any]:
+        active_source = self.active_source()
+        return {
+            "supported": active_source is not None and active_source.kind == "pi",
+            "white_balance_mode": self._white_balance_mode,
+            "brightness": self._brightness,
+            "contrast": self._contrast,
+            "saturation": self._saturation,
+            "sharpness": self._sharpness,
+            "denoise_mode": self._denoise_mode,
+            "white_balance_options": [
+                asdict(option) for option in self.WHITE_BALANCE_OPTIONS
+            ],
+            "denoise_options": [asdict(option) for option in self.DENOISE_OPTIONS],
+            "ranges": {
+                "brightness": dict(self.BRIGHTNESS_RANGE),
+                "contrast": dict(self.CONTRAST_RANGE),
+                "saturation": dict(self.SATURATION_RANGE),
+                "sharpness": dict(self.SHARPNESS_RANGE),
+            },
         }
 
     @staticmethod
@@ -698,17 +904,21 @@ class CameraService:
             "--quality",
             str(quality),
             "--awb",
-            lighting_profile.awb,
+            self._white_balance_mode,
             "--exposure",
             lighting_profile.exposure,
             "--metering",
             lighting_profile.metering,
             "--brightness",
-            str(lighting_profile.brightness),
+            str(self._brightness),
             "--contrast",
-            str(lighting_profile.contrast),
+            str(self._contrast),
+            "--saturation",
+            str(self._saturation),
+            "--sharpness",
+            str(self._sharpness),
             "--denoise",
-            lighting_profile.denoise,
+            self._denoise_mode,
         ]
 
         subprocess.run(

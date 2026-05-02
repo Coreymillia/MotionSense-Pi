@@ -66,6 +66,7 @@ class MotionDetector:
         self._last_error: str | None = None
         self._last_score: float | None = None
         self._last_capture_monotonic = 0.0
+        self._motion_epoch = 0
         self._probe_path = self.event_dir / "_probe.jpg"
         self._load_config()
 
@@ -190,6 +191,10 @@ class MotionDetector:
     def events_payload(self) -> list[dict[str, Any]]:
         with self._lock:
             return [asdict(event) for event in reversed(self._events)]
+
+    def motion_marker(self) -> tuple[int, str | None]:
+        with self._lock:
+            return self._motion_epoch, self._last_motion_at
 
     def archived_events_payload(self, limit: int | None = None) -> list[dict[str, Any]]:
         return self._records_payload_for_directory(
@@ -560,5 +565,6 @@ class MotionDetector:
             self._last_motion_at = detected_at
             self._last_capture_monotonic = capture_started
             self._last_error = None
+            self._motion_epoch += 1
 
         self.sense_hat.show_status("capture-ok")

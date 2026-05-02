@@ -31,7 +31,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("burst_count", payload["camera"])
         self.assertIn("rotation_degrees", payload["camera"])
         self.assertIn("lighting", payload["camera"])
+        self.assertIn("tuning", payload["camera"])
         self.assertIn("options", payload["camera"]["resolution"])
+        self.assertIn("white_balance_options", payload["camera"]["tuning"])
 
     def test_network_camera_endpoint_accepts_url(self):
         app = create_app(start_detector=False)
@@ -94,6 +96,32 @@ class WebTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["status"]["camera"]["lighting"]["mode"], "fluorescent")
 
+    def test_settings_endpoint_updates_direct_camera_tuning(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/settings",
+            json={
+                "white_balance_mode": "cloudy",
+                "brightness": -0.2,
+                "contrast": 1.3,
+                "saturation": 0.9,
+                "sharpness": 1.6,
+                "denoise_mode": "off",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"]["camera"]["tuning"]["white_balance_mode"], "cloudy")
+        self.assertEqual(payload["status"]["camera"]["tuning"]["brightness"], -0.2)
+        self.assertEqual(payload["status"]["camera"]["tuning"]["contrast"], 1.3)
+        self.assertEqual(payload["status"]["camera"]["tuning"]["saturation"], 0.9)
+        self.assertEqual(payload["status"]["camera"]["tuning"]["sharpness"], 1.6)
+        self.assertEqual(payload["status"]["camera"]["tuning"]["denoise_mode"], "off")
+
     def test_rotate_camera_endpoint_updates_snapshot(self):
         app = create_app(start_detector=False)
         client = app.test_client()
@@ -123,10 +151,27 @@ class WebTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["status"]["timer"]["interval_seconds"], 120)
         self.assertTrue(payload["status"]["timer"]["armed"])
+        self.assertEqual(payload["status"]["timer"]["mode"], "timer")
 
         stop_response = client.post("/api/timer/stop")
         self.assertEqual(stop_response.status_code, 200)
         self.assertFalse(stop_response.get_json()["status"]["timer"]["armed"])
+
+    def test_combo_timer_start_endpoint_updates_mode_and_duration(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        response = client.post(
+            "/api/timer/start",
+            json={"interval_seconds": 7, "duration_seconds": 60, "mode": "combo"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"]["timer"]["interval_seconds"], 7)
+        self.assertEqual(payload["status"]["timer"]["duration_seconds"], 60)
+        self.assertEqual(payload["status"]["timer"]["mode"], "combo")
 
     def test_delete_events_endpoint_returns_updated_payload(self):
         app = create_app(start_detector=False)

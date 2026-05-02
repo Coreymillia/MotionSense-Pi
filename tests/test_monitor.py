@@ -64,21 +64,37 @@ class FakeMotionDetector:
 class FakeTimedCapture:
     def __init__(self) -> None:
         self.interval_seconds = 60
+        self.mode = "timer"
+        self.duration_seconds = 60
         self.armed = False
 
     def status_payload(self):
         return {
             "armed": self.armed,
             "running": self.armed,
+            "mode": self.mode,
             "interval_seconds": self.interval_seconds,
+            "duration_seconds": self.duration_seconds,
             "last_capture_at": None,
+            "last_motion_at": None,
+            "waiting_for_motion": False,
+            "last_motion_score": None,
             "last_error": None,
             "capture_count": 0,
         }
 
-    def start(self, interval_seconds: int | None = None) -> None:
+    def start(
+        self,
+        interval_seconds: int | None = None,
+        mode: str | None = None,
+        duration_seconds: int | None = None,
+    ) -> None:
         if interval_seconds is not None:
             self.interval_seconds = interval_seconds
+        if mode is not None:
+            self.mode = mode
+        if duration_seconds is not None:
+            self.duration_seconds = duration_seconds
         self.armed = True
 
     def stop(self) -> None:
@@ -132,6 +148,20 @@ class MonitorServiceTests(unittest.TestCase):
         camera.lighting_payload = Mock(
             return_value={"mode": "auto", "supported": True, "options": []}
         )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
+        )
         camera.rotate_clockwise = Mock(return_value=90)
         camera.set_burst_count = Mock()
         camera.active_capture_target = Mock(return_value="/dev/video1")
@@ -178,6 +208,20 @@ class MonitorServiceTests(unittest.TestCase):
         camera.lighting_payload = Mock(
             return_value={"mode": "auto", "supported": True, "options": []}
         )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
+        )
         camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
         camera.list_sources = Mock(return_value=[])
         camera.resolution_payload = Mock(
@@ -212,6 +256,20 @@ class MonitorServiceTests(unittest.TestCase):
         camera.rotation_degrees = Mock(return_value=0)
         camera.lighting_payload = Mock(
             return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
         )
         camera.set_lighting_mode = Mock()
         camera.set_resolution = Mock()
@@ -262,6 +320,20 @@ class MonitorServiceTests(unittest.TestCase):
         camera.rotation_degrees = Mock(return_value=0)
         camera.lighting_payload = Mock(
             return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
         )
         camera.set_lighting_mode = Mock()
         camera.resolution_payload = Mock(
@@ -316,6 +388,20 @@ class MonitorServiceTests(unittest.TestCase):
         camera.lighting_payload = Mock(
             return_value={"mode": "auto", "supported": True, "options": []}
         )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
+        )
         camera.set_lighting_mode = Mock()
         camera.resolution_payload = Mock(
             return_value={
@@ -359,10 +445,30 @@ class MonitorServiceTests(unittest.TestCase):
         camera.set_burst_count = Mock()
         camera.set_resolution = Mock()
         camera.set_lighting_mode = Mock()
+        camera.set_white_balance_mode = Mock()
+        camera.set_brightness = Mock()
+        camera.set_contrast = Mock()
+        camera.set_saturation = Mock()
+        camera.set_sharpness = Mock()
+        camera.set_denoise_mode = Mock()
         camera.burst_count = Mock(return_value=1)
         camera.rotation_degrees = Mock(return_value=0)
         camera.lighting_payload = Mock(
             return_value={"mode": "fluorescent", "supported": True, "options": []}
+        )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "cloudy",
+                "brightness": -0.2,
+                "contrast": 1.3,
+                "saturation": 0.9,
+                "sharpness": 1.6,
+                "denoise_mode": "off",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
         )
         camera.resolution_payload = Mock(
             return_value={
@@ -401,6 +507,86 @@ class MonitorServiceTests(unittest.TestCase):
         camera.set_lighting_mode.assert_called_once_with("fluorescent")
         self.assertEqual(payload["camera"]["lighting"]["mode"], "fluorescent")
 
+    def test_update_capture_settings_updates_camera_tuning(self):
+        camera = Mock()
+        camera.set_burst_count = Mock()
+        camera.set_resolution = Mock()
+        camera.set_lighting_mode = Mock()
+        camera.set_white_balance_mode = Mock()
+        camera.set_brightness = Mock()
+        camera.set_contrast = Mock()
+        camera.set_saturation = Mock()
+        camera.set_sharpness = Mock()
+        camera.set_denoise_mode = Mock()
+        camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "daylight", "supported": True, "options": []}
+        )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "cloudy",
+                "brightness": -0.2,
+                "contrast": 1.3,
+                "saturation": 0.9,
+                "sharpness": 1.6,
+                "denoise_mode": "off",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
+        )
+        camera.resolution_payload = Mock(
+            return_value={
+                "width": 1280,
+                "height": 720,
+                "options": [{"width": 1280, "height": 720, "label": "1280 x 720"}],
+            }
+        )
+        camera.snapshot_details = Mock(
+            return_value=SnapshotDetails(
+                exists=False,
+                path="/tmp/latest.jpg",
+                modified_at=None,
+                size_bytes=None,
+            )
+        )
+        camera.active_source = Mock(return_value=None)
+        camera.is_available = Mock(return_value=True)
+        camera.selected_source_id = Mock(return_value="pi-camera")
+        camera.selected_source_name = Mock(return_value="Pi Camera")
+        camera.network_camera_url = Mock(return_value=None)
+        camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
+        camera.list_sources = Mock(return_value=[])
+        camera.width = 1280
+        camera.height = 720
+
+        monitor = MonitorService(
+            camera=camera,
+            sense_hat=FakeSenseHat(),
+            motion_detector=FakeMotionDetector(),
+            timed_capture=FakeTimedCapture(),
+        )
+
+        payload = monitor.update_capture_settings(
+            white_balance_mode="cloudy",
+            brightness=-0.2,
+            contrast=1.3,
+            saturation=0.9,
+            sharpness=1.6,
+            denoise_mode="off",
+        )
+
+        camera.set_white_balance_mode.assert_called_once_with("cloudy")
+        camera.set_brightness.assert_called_once_with(-0.2)
+        camera.set_contrast.assert_called_once_with(1.3)
+        camera.set_saturation.assert_called_once_with(0.9)
+        camera.set_sharpness.assert_called_once_with(1.6)
+        camera.set_denoise_mode.assert_called_once_with("off")
+        self.assertEqual(payload["camera"]["tuning"]["white_balance_mode"], "cloudy")
+        self.assertEqual(payload["camera"]["tuning"]["brightness"], -0.2)
+
     def test_archived_events_payload_passes_through_to_motion_detector(self):
         with TemporaryDirectory() as temp_dir:
             camera = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
@@ -436,6 +622,20 @@ class MonitorServiceTests(unittest.TestCase):
         camera.lighting_payload = Mock(
             return_value={"mode": "auto", "supported": True, "options": []}
         )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
+        )
         camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
         camera.list_sources = Mock(return_value=[])
         camera.width = 1280
@@ -452,9 +652,71 @@ class MonitorServiceTests(unittest.TestCase):
         started = monitor.start_timed_capture(120)
         self.assertTrue(started["timer"]["armed"])
         self.assertEqual(started["timer"]["interval_seconds"], 120)
+        self.assertEqual(started["timer"]["mode"], "timer")
 
         stopped = monitor.stop_timed_capture()
         self.assertFalse(stopped["timer"]["armed"])
+
+    def test_start_combo_capture_updates_status(self):
+        camera = Mock()
+        camera.snapshot_details = Mock(
+            return_value=SnapshotDetails(
+                exists=False,
+                path="/tmp/latest.jpg",
+                modified_at=None,
+                size_bytes=None,
+            )
+        )
+        camera.active_source = Mock(return_value=None)
+        camera.is_available = Mock(return_value=True)
+        camera.selected_source_id = Mock(return_value="pi-camera")
+        camera.selected_source_name = Mock(return_value="Pi Camera")
+        camera.network_camera_url = Mock(return_value=None)
+        camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
+        )
+        camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
+        camera.list_sources = Mock(return_value=[])
+        camera.resolution_payload = Mock(
+            return_value={
+                "width": 1280,
+                "height": 720,
+                "options": [{"width": 1280, "height": 720, "label": "1280 x 720"}],
+            }
+        )
+        camera.width = 1280
+        camera.height = 720
+
+        timed_capture = FakeTimedCapture()
+        monitor = MonitorService(
+            camera=camera,
+            sense_hat=FakeSenseHat(),
+            motion_detector=FakeMotionDetector(),
+            timed_capture=timed_capture,
+        )
+
+        started = monitor.start_timed_capture(7, mode="combo", duration_seconds=60)
+
+        self.assertTrue(started["timer"]["armed"])
+        self.assertEqual(started["timer"]["mode"], "combo")
+        self.assertEqual(started["timer"]["interval_seconds"], 7)
+        self.assertEqual(started["timer"]["duration_seconds"], 60)
 
 
 if __name__ == "__main__":

@@ -217,6 +217,40 @@ dd {
   min-width: 130px;
 }
 
+.setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #cbd5e1;
+}
+
+.setting-field-label {
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+
+.setting-inline {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.setting-inline > input {
+  min-width: 100px;
+}
+
+.setting-inline > select {
+  min-width: 120px;
+}
+
+.tuning-actions > input {
+  min-width: 110px;
+}
+
+.tuning-actions > select {
+  min-width: 150px;
+}
+
 .event-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

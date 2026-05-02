@@ -133,14 +133,24 @@ def create_app(start_detector: bool = True) -> Flask:
     def api_timer_start():
         payload = request.get_json(silent=True) or {}
         interval_seconds = payload.get("interval_seconds")
+        mode = payload.get("mode", "timer")
+        duration_seconds = payload.get("duration_seconds", 60)
         if isinstance(interval_seconds, bool) or not isinstance(interval_seconds, (int, float)):
             return jsonify({"ok": False, "error": "interval_seconds must be a number."}), 400
+        if not isinstance(mode, str):
+            return jsonify({"ok": False, "error": "mode must be timer or combo."}), 400
+        if isinstance(duration_seconds, bool) or not isinstance(duration_seconds, (int, float)):
+            return jsonify({"ok": False, "error": "duration_seconds must be a number."}), 400
 
         try:
             return jsonify(
                 {
                     "ok": True,
-                    "status": monitor.start_timed_capture(int(interval_seconds)),
+                    "status": monitor.start_timed_capture(
+                        int(interval_seconds),
+                        mode=mode.strip(),
+                        duration_seconds=int(duration_seconds),
+                    ),
                 }
             )
         except RuntimeError as exc:
@@ -193,6 +203,12 @@ def create_app(start_detector: bool = True) -> Flask:
         has_burst_count = "burst_count" in payload
         has_resolution = "resolution" in payload
         has_lighting_mode = "lighting_mode" in payload
+        has_white_balance = "white_balance_mode" in payload
+        has_brightness = "brightness" in payload
+        has_contrast = "contrast" in payload
+        has_saturation = "saturation" in payload
+        has_sharpness = "sharpness" in payload
+        has_denoise = "denoise_mode" in payload
         has_cooldown = "cooldown_seconds" in payload
         has_threshold = "motion_threshold" in payload
         if (
@@ -200,6 +216,12 @@ def create_app(start_detector: bool = True) -> Flask:
             and not has_burst_count
             and not has_resolution
             and not has_lighting_mode
+            and not has_white_balance
+            and not has_brightness
+            and not has_contrast
+            and not has_saturation
+            and not has_sharpness
+            and not has_denoise
             and not has_cooldown
             and not has_threshold
         ):
@@ -209,6 +231,12 @@ def create_app(start_detector: bool = True) -> Flask:
         burst_count = payload.get("burst_count") if has_burst_count else None
         resolution = payload.get("resolution") if has_resolution else None
         lighting_mode = payload.get("lighting_mode") if has_lighting_mode else None
+        white_balance_mode = payload.get("white_balance_mode") if has_white_balance else None
+        brightness = payload.get("brightness") if has_brightness else None
+        contrast = payload.get("contrast") if has_contrast else None
+        saturation = payload.get("saturation") if has_saturation else None
+        sharpness = payload.get("sharpness") if has_sharpness else None
+        denoise_mode = payload.get("denoise_mode") if has_denoise else None
         cooldown = payload.get("cooldown_seconds") if has_cooldown else None
         threshold = payload.get("motion_threshold") if has_threshold else None
 
@@ -234,6 +262,26 @@ def create_app(start_detector: bool = True) -> Flask:
             return jsonify({"ok": False, "error": "resolution must be a string like 1280x720."}), 400
         if has_lighting_mode and not isinstance(lighting_mode, str):
             return jsonify({"ok": False, "error": "lighting_mode must be a preset name."}), 400
+        if has_white_balance and not isinstance(white_balance_mode, str):
+            return jsonify({"ok": False, "error": "white_balance_mode must be a preset name."}), 400
+        if has_denoise and not isinstance(denoise_mode, str):
+            return jsonify({"ok": False, "error": "denoise_mode must be a preset name."}), 400
+        if has_brightness and (
+            isinstance(brightness, bool) or not isinstance(brightness, (int, float))
+        ):
+            return jsonify({"ok": False, "error": "brightness must be a number."}), 400
+        if has_contrast and (
+            isinstance(contrast, bool) or not isinstance(contrast, (int, float))
+        ):
+            return jsonify({"ok": False, "error": "contrast must be a number."}), 400
+        if has_saturation and (
+            isinstance(saturation, bool) or not isinstance(saturation, (int, float))
+        ):
+            return jsonify({"ok": False, "error": "saturation must be a number."}), 400
+        if has_sharpness and (
+            isinstance(sharpness, bool) or not isinstance(sharpness, (int, float))
+        ):
+            return jsonify({"ok": False, "error": "sharpness must be a number."}), 400
 
         resolution_pair: tuple[int, int] | None = None
         if has_resolution:
@@ -253,6 +301,14 @@ def create_app(start_detector: bool = True) -> Flask:
                         burst_count=burst_count if has_burst_count else None,
                         resolution=resolution_pair,
                         lighting_mode=lighting_mode.strip() if has_lighting_mode else None,
+                        white_balance_mode=white_balance_mode.strip()
+                        if has_white_balance
+                        else None,
+                        brightness=float(brightness) if has_brightness else None,
+                        contrast=float(contrast) if has_contrast else None,
+                        saturation=float(saturation) if has_saturation else None,
+                        sharpness=float(sharpness) if has_sharpness else None,
+                        denoise_mode=denoise_mode.strip() if has_denoise else None,
                         cooldown_seconds=float(cooldown) if has_cooldown else None,
                         motion_threshold=float(threshold) if has_threshold else None,
                     ),

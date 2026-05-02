@@ -215,6 +215,27 @@ class CameraServiceTests(unittest.TestCase):
             reloaded = CameraService(snapshot_path=snapshot_path)
             self.assertEqual(reloaded.lighting_mode(), "fluorescent")
 
+    def test_direct_tuning_persists_in_camera_config(self):
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "latest.jpg"
+            service = CameraService(snapshot_path=snapshot_path)
+
+            service.set_white_balance_mode("cloudy")
+            service.set_brightness(-0.2)
+            service.set_contrast(1.3)
+            service.set_saturation(0.85)
+            service.set_sharpness(1.6)
+            service.set_denoise_mode("off")
+
+            reloaded = CameraService(snapshot_path=snapshot_path)
+            payload = reloaded.tuning_payload()
+            self.assertEqual(payload["white_balance_mode"], "cloudy")
+            self.assertEqual(payload["brightness"], -0.2)
+            self.assertEqual(payload["contrast"], 1.3)
+            self.assertEqual(payload["saturation"], 0.85)
+            self.assertEqual(payload["sharpness"], 1.6)
+            self.assertEqual(payload["denoise_mode"], "off")
+
     def test_pi_capture_command_uses_selected_lighting_profile(self):
         with TemporaryDirectory() as temp_dir:
             service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
@@ -231,6 +252,29 @@ class CameraServiceTests(unittest.TestCase):
             self.assertIn("average", command)
             self.assertIn("--denoise", command)
             self.assertIn("cdn_hq", command)
+
+    def test_pi_capture_command_uses_direct_tuning_values(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service.rpicam_executable = "/usr/bin/rpicam-still"
+            service.set_lighting_mode("daylight")
+            service.set_white_balance_mode("cloudy")
+            service.set_brightness(-0.2)
+            service.set_contrast(1.3)
+            service.set_saturation(0.9)
+            service.set_sharpness(1.6)
+            service.set_denoise_mode("off")
+
+            with patch("app.camera.subprocess.run") as run:
+                service._capture_pi_image(Path(temp_dir) / "frame.jpg", width=640, height=480, quality=90)
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--awb") + 1], "cloudy")
+            self.assertEqual(command[command.index("--brightness") + 1], "-0.2")
+            self.assertEqual(command[command.index("--contrast") + 1], "1.3")
+            self.assertEqual(command[command.index("--saturation") + 1], "0.9")
+            self.assertEqual(command[command.index("--sharpness") + 1], "1.6")
+            self.assertEqual(command[command.index("--denoise") + 1], "off")
 
     def test_capture_image_applies_configured_rotation(self):
         with TemporaryDirectory() as temp_dir:

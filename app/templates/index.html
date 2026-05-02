@@ -75,64 +75,158 @@
           <div class="camera-config">
             <label for="motion-poll-interval">Capture Settings</label>
             <div class="actions compact settings-actions">
-              <select id="capture-resolution">
-                {% for option in status.camera.resolution.options %}
-                  <option
-                    value="{{ option.width }}x{{ option.height }}"
-                    {% if option.width == status.camera.resolution.width and option.height == status.camera.resolution.height %}selected{% endif %}
-                  >
-                    {{ option.label }}
-                  </option>
-                {% endfor %}
-              </select>
-              <select id="capture-lighting">
-                {% for option in status.camera.lighting.options %}
-                  <option value="{{ option.mode }}" {% if option.mode == status.camera.lighting.mode %}selected{% endif %}>
-                    {{ option.label }}
-                  </option>
-                {% endfor %}
-              </select>
-              <input
-                id="motion-poll-interval"
-                type="number"
-                min="0.5"
-                max="30"
-                step="0.5"
-                value="{{ status.motion.poll_interval_seconds if status.motion else 3 }}"
-                title="Motion poll interval in seconds"
-              >
-              <input
-                id="motion-cooldown"
-                type="number"
-                min="1"
-                max="300"
-                step="1"
-                value="{{ status.motion.cooldown_seconds if status.motion else 10 }}"
-                title="Cooldown after a motion event in seconds"
-              >
-              <input
-                id="motion-threshold"
-                type="number"
-                min="1"
-                max="255"
-                step="0.5"
-                value="{{ status.motion.motion_threshold if status.motion else 18 }}"
-                title="Motion sensitivity threshold"
-              >
-              <select id="capture-burst-count">
-                {% for count in range(1, 6) %}
-                  <option
-                    value="{{ count }}"
-                    {% if count == status.camera.burst_count %}selected{% endif %}
-                  >
-                    {{ count }} photo{% if count != 1 %}s{% endif %}
-                  </option>
-                {% endfor %}
-              </select>
-              <button id="settings-button">Save Settings</button>
+              <label class="setting-field" for="capture-resolution">
+                <span class="setting-field-label">Resolution</span>
+                <select id="capture-resolution">
+                  {% for option in status.camera.resolution.options %}
+                    <option
+                      value="{{ option.width }}x{{ option.height }}"
+                      {% if option.width == status.camera.resolution.width and option.height == status.camera.resolution.height %}selected{% endif %}
+                    >
+                      {{ option.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="setting-field" for="capture-lighting">
+                <span class="setting-field-label">Lighting Preset</span>
+                <select id="capture-lighting">
+                  {% for option in status.camera.lighting.options %}
+                    <option value="{{ option.mode }}" {% if option.mode == status.camera.lighting.mode %}selected{% endif %}>
+                      {{ option.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="setting-field" for="motion-poll-interval">
+                <span class="setting-field-label">Motion Poll</span>
+                <input
+                  id="motion-poll-interval"
+                  type="number"
+                  min="0.5"
+                  max="30"
+                  step="0.5"
+                  value="{{ status.motion.poll_interval_seconds if status.motion else 3 }}"
+                  title="Motion poll interval in seconds"
+                >
+              </label>
+              <label class="setting-field" for="motion-cooldown">
+                <span class="setting-field-label">Motion Cooldown</span>
+                <input
+                  id="motion-cooldown"
+                  type="number"
+                  min="1"
+                  max="300"
+                  step="1"
+                  value="{{ status.motion.cooldown_seconds if status.motion else 10 }}"
+                  title="Cooldown after a motion event in seconds"
+                >
+              </label>
+              <label class="setting-field" for="motion-threshold">
+                <span class="setting-field-label">Motion Threshold</span>
+                <input
+                  id="motion-threshold"
+                  type="number"
+                  min="1"
+                  max="255"
+                  step="0.5"
+                  value="{{ status.motion.motion_threshold if status.motion else 18 }}"
+                  title="Motion sensitivity threshold"
+                >
+              </label>
+              <label class="setting-field" for="capture-burst-count">
+                <span class="setting-field-label">Burst Count</span>
+                <select id="capture-burst-count">
+                  {% for count in range(1, 6) %}
+                    <option
+                      value="{{ count }}"
+                      {% if count == status.camera.burst_count %}selected{% endif %}
+                    >
+                      {{ count }} photo{% if count != 1 %}s{% endif %}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
             </div>
             <p id="camera-lighting-note" class="subtle">
               Lighting presets tune the Pi Camera. Auto is the current default.
+            </p>
+          </div>
+          <div class="camera-config">
+            <label for="capture-white-balance">Pi Camera Tuning</label>
+            <div class="actions compact settings-actions tuning-actions">
+              <label class="setting-field" for="capture-white-balance">
+                <span class="setting-field-label">White Balance</span>
+                <select id="capture-white-balance">
+                  {% for option in status.camera.tuning.white_balance_options %}
+                    <option value="{{ option.value }}" {% if option.value == status.camera.tuning.white_balance_mode %}selected{% endif %}>
+                      {{ option.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="setting-field" for="capture-denoise">
+                <span class="setting-field-label">Denoise</span>
+                <select id="capture-denoise">
+                  {% for option in status.camera.tuning.denoise_options %}
+                    <option value="{{ option.value }}" {% if option.value == status.camera.tuning.denoise_mode %}selected{% endif %}>
+                      {{ option.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="setting-field" for="capture-brightness">
+                <span class="setting-field-label">Brightness</span>
+                <input
+                  id="capture-brightness"
+                  type="number"
+                  min="{{ status.camera.tuning.ranges.brightness.min }}"
+                  max="{{ status.camera.tuning.ranges.brightness.max }}"
+                  step="{{ status.camera.tuning.ranges.brightness.step }}"
+                  value="{{ status.camera.tuning.brightness }}"
+                  title="Brightness adjustment for bright windows or darker rooms"
+                >
+              </label>
+              <label class="setting-field" for="capture-contrast">
+                <span class="setting-field-label">Contrast</span>
+                <input
+                  id="capture-contrast"
+                  type="number"
+                  min="{{ status.camera.tuning.ranges.contrast.min }}"
+                  max="{{ status.camera.tuning.ranges.contrast.max }}"
+                  step="{{ status.camera.tuning.ranges.contrast.step }}"
+                  value="{{ status.camera.tuning.contrast }}"
+                  title="Contrast adjustment"
+                >
+              </label>
+              <label class="setting-field" for="capture-saturation">
+                <span class="setting-field-label">Saturation</span>
+                <input
+                  id="capture-saturation"
+                  type="number"
+                  min="{{ status.camera.tuning.ranges.saturation.min }}"
+                  max="{{ status.camera.tuning.ranges.saturation.max }}"
+                  step="{{ status.camera.tuning.ranges.saturation.step }}"
+                  value="{{ status.camera.tuning.saturation }}"
+                  title="Color saturation adjustment"
+                >
+              </label>
+              <label class="setting-field" for="capture-sharpness">
+                <span class="setting-field-label">Sharpness</span>
+                <input
+                  id="capture-sharpness"
+                  type="number"
+                  min="{{ status.camera.tuning.ranges.sharpness.min }}"
+                  max="{{ status.camera.tuning.ranges.sharpness.max }}"
+                  step="{{ status.camera.tuning.ranges.sharpness.step }}"
+                  value="{{ status.camera.tuning.sharpness }}"
+                  title="Image sharpness adjustment"
+                >
+              </label>
+              <button id="settings-button">Save Settings</button>
+            </div>
+            <p id="camera-tuning-note" class="subtle">
+              Direct Pi Camera tuning helps balance bright windows and changing room light.
             </p>
           </div>
         </article>
@@ -144,27 +238,58 @@
 
         <article class="card">
           <div class="card-header">
-            <h2>Timed Capture</h2>
+            <h2>Auto Capture</h2>
             <div class="actions compact">
-              <button id="timer-start-button">Start Timer</button>
-              <button id="timer-stop-button">Stop Timer</button>
+              <button id="timer-start-button">Start Auto Capture</button>
+              <button id="timer-stop-button">Stop Auto Capture</button>
             </div>
           </div>
           <div class="camera-config">
-            <label for="timer-interval-value">Capture Interval</label>
+            <label for="timer-mode">Auto Capture Settings</label>
             <div class="actions compact settings-actions">
-              <input
-                id="timer-interval-value"
-                type="number"
-                min="1"
-                step="1"
-                value="60"
-              >
-              <select id="timer-interval-unit">
-                <option value="seconds">Seconds</option>
-                <option value="minutes">Minutes</option>
-              </select>
+              <label class="setting-field" for="timer-mode">
+                <span class="setting-field-label">Mode</span>
+                <select id="timer-mode">
+                  <option value="timer" {% if status.timer and status.timer.mode == "timer" %}selected{% endif %}>Timer</option>
+                  <option value="combo" {% if status.timer and status.timer.mode == "combo" %}selected{% endif %}>Motion + Timer</option>
+                </select>
+              </label>
+              <label class="setting-field" for="timer-interval-value">
+                <span class="setting-field-label">Capture Every</span>
+                <div class="setting-inline">
+                  <input
+                    id="timer-interval-value"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value="60"
+                  >
+                  <select id="timer-interval-unit">
+                    <option value="seconds">Seconds</option>
+                    <option value="minutes">Minutes</option>
+                  </select>
+                </div>
+              </label>
+              <label class="setting-field" for="timer-duration-value">
+                <span class="setting-field-label">Capture For</span>
+                <div class="setting-inline">
+                  <input
+                    id="timer-duration-value"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value="1"
+                  >
+                  <select id="timer-duration-unit">
+                    <option value="minutes">Minutes</option>
+                    <option value="seconds">Seconds</option>
+                  </select>
+                </div>
+              </label>
             </div>
+            <p id="timer-mode-note" class="subtle">
+              Timer captures immediately on a fixed schedule. Motion + Timer waits for movement, then captures every few seconds for the selected duration.
+            </p>
           </div>
           <dl id="timer-panel"></dl>
         </article>
@@ -229,7 +354,7 @@
         <div class="card-header">
           <div>
             <h2>Motion Events</h2>
-            <p class="subtle">Recent motion and timed captures appear here.</p>
+            <p class="subtle">Recent motion and auto capture photos appear here.</p>
           </div>
           <div class="actions compact">
             <button id="events-select-button" type="button">Select All</button>
