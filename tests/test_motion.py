@@ -116,6 +116,55 @@ class MotionDetectorTests(unittest.TestCase):
             self.assertEqual(events[0]["source"], "motion")
             self.assertIsNone(events[0]["score"])
 
+    def test_archived_events_payload_can_filter_by_day(self):
+        with TemporaryDirectory() as temp_dir:
+            event_dir = Path(temp_dir) / "events"
+            event_dir.mkdir(parents=True, exist_ok=True)
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=event_dir,
+            )
+
+            Image.new("RGB", (320, 240), color="red").save(
+                event_dir / "20260416T201500000000Z.jpg", format="JPEG"
+            )
+            Image.new("RGB", (320, 240), color="blue").save(
+                event_dir / "20260417T201700000000Z.jpg", format="JPEG"
+            )
+
+            events = detector.archived_events_payload(day_key="2026-04-16")
+
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event_id"], "20260416T201500000000Z")
+
+    def test_archived_event_day_groups_count_events_per_day(self):
+        with TemporaryDirectory() as temp_dir:
+            event_dir = Path(temp_dir) / "events"
+            event_dir.mkdir(parents=True, exist_ok=True)
+            detector = MotionDetector(
+                camera=FakeCamera(Path(temp_dir) / "latest.jpg"),
+                sense_hat=FakeSenseHat(),
+                event_dir=event_dir,
+            )
+
+            Image.new("RGB", (320, 240), color="red").save(
+                event_dir / "20260416T201500000000Z.jpg", format="JPEG"
+            )
+            Image.new("RGB", (320, 240), color="blue").save(
+                event_dir / "20260416T201700000000Z.jpg", format="JPEG"
+            )
+            Image.new("RGB", (320, 240), color="green").save(
+                event_dir / "20260415T201700000000Z.jpg", format="JPEG"
+            )
+
+            day_groups = detector.archived_event_day_groups()
+
+            self.assertEqual(day_groups[0]["day_key"], "2026-04-16")
+            self.assertEqual(day_groups[0]["event_count"], 2)
+            self.assertEqual(day_groups[1]["day_key"], "2026-04-15")
+            self.assertEqual(day_groups[1]["event_count"], 1)
+
     def test_gallery_payload_lists_moved_images(self):
         with TemporaryDirectory() as temp_dir:
             gallery_dir = Path(temp_dir) / "gallery"

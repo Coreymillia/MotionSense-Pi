@@ -48,8 +48,11 @@ class FakeMotionDetector:
     def events_payload(self):
         return [{"event_id": "evt-1", "score": 42.0}]
 
-    def archived_events_payload(self, limit=None):
-        return [{"event_id": "evt-archive", "score": None, "limit": limit}]
+    def archived_events_payload(self, limit=None, day_key=None):
+        return [{"event_id": "evt-archive", "score": None, "limit": limit, "day_key": day_key}]
+
+    def archived_event_day_groups(self):
+        return [{"day_key": "2026-04-16", "label": "Thursday, April 16, 2026", "event_count": 1}]
 
     def set_poll_interval_seconds(self, value: float) -> None:
         self.poll_interval_seconds = value
@@ -597,10 +600,26 @@ class MonitorServiceTests(unittest.TestCase):
                 timed_capture=FakeTimedCapture(),
             )
 
-            payload = monitor.archived_events_payload(limit=25)
+            payload = monitor.archived_events_payload(limit=25, day_key="2026-04-16")
 
             self.assertEqual(payload[0]["event_id"], "evt-archive")
             self.assertEqual(payload[0]["limit"], 25)
+            self.assertEqual(payload[0]["day_key"], "2026-04-16")
+
+    def test_archived_event_day_groups_pass_through_to_motion_detector(self):
+        with TemporaryDirectory() as temp_dir:
+            camera = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            monitor = MonitorService(
+                camera=camera,
+                sense_hat=FakeSenseHat(),
+                motion_detector=FakeMotionDetector(),
+                timed_capture=FakeTimedCapture(),
+            )
+
+            payload = monitor.archived_event_day_groups()
+
+            self.assertEqual(payload[0]["day_key"], "2026-04-16")
+            self.assertEqual(payload[0]["event_count"], 1)
 
     def test_start_and_stop_timed_capture_updates_status(self):
         camera = Mock()

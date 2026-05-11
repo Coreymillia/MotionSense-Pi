@@ -36,6 +36,18 @@ class CameraSource:
     command: str | None = None
     device: str | None = None
     base_url: str | None = None
+    camera_index: int | None = None
+    sensor_name: str | None = None
+    model_name: str | None = None
+
+
+@dataclass(frozen=True)
+class PiCameraInfo:
+    camera_index: int
+    sensor_name: str
+    model_name: str | None
+    device_path: str | None
+    resolutions: tuple[tuple[int, int], ...]
 
 
 @dataclass(frozen=True)
@@ -178,6 +190,8 @@ class CameraService:
         self._sharpness = 1.0
         self._denoise_mode = default_profile.denoise
         self._resolution_options: tuple[ResolutionOption, ...] | None = None
+        self._resolution_options_cache_key: tuple[str | None, int, int] | None = None
+        self._pi_camera_infos: tuple[PiCameraInfo, ...] = ()
         self._source_cache_ttl_seconds = 5.0
         self._source_cache_at = 0.0
         self._source_cache: tuple[CameraSource, ...] | None = None
@@ -532,7 +546,82 @@ class CameraService:
             (3280, 2464),
         ]
 
-    def _probe_resolution_pairs(self) -> list[tuple[int, int]]:
+    @staticmethod
+    def _normalize_resolution_pair(width: str, height: str) -> tuple[int, int]:
+        return (int(width), int(height))
+
+    @classmethod
+    def _parse_pi_camera_listing(cls, output: str) -> list[PiCameraInfo]:
+        cameras: list[dict[str, Any]] = []
+        current: dict[str, Any] | None = None
+
+        for raw_line in output.splitlines():
+            if not raw_line.strip():
+                continue
+            if raw_line.strip().lower().startswith("available cameras"):
+                continue
+
+            header_match = re.match(r"^(\d+)\s*:\s*(.+?)\s*$", raw_line)
+            if header_match is not None:
+                if current is not None:
+                    cameras.append(current)
+
+                descriptor = header_match.group(2).strip()
+                descriptor = re.sub(r"\s+\([^)]*\)\s*$", "", descriptor)
+                detail_match = re.match(
+                    r"^(?P<sensor>[^\s\[]+)(?:\s+\[(?P<detail>.+?)\])?$",
+                    descriptor,
+                )
+                sensor_name = descriptor
+                model_name: str | None = None
+                if detail_match is not None:
+                    sensor_name = detail_match.group("sensor")
+                    detail = detail_match.group("detail")
+                    if detail and re.search(r"\d+x\d+", detail) is None:
+                        model_name = detail.strip()
+
+                current = {
+                    "camera_index": int(header_match.group(1)),
+                    "sensor_name": sensor_name.strip(),
+                    "model_name": model_name,
+                    "device_path": None,
+                    "resolutions": [],
+                }
+                continue
+
+            if current is None:
+                continue
+
+            stripped = raw_line.strip()
+            if stripped.startswith("/"):
+                current["device_path"] = stripped
+                continue
+
+            if stripped.lower().startswith("model:"):
+                model_name = stripped.split(":", 1)[1].strip()
+                if model_name:
+                    current["model_name"] = model_name
+
+            for width, height in re.findall(r"(\d+)x(\d+)", stripped):
+                resolution = cls._normalize_resolution_pair(width, height)
+                if resolution not in current["resolutions"]:
+                    current["resolutions"].append(resolution)
+
+        if current is not None:
+            cameras.append(current)
+
+        return [
+            PiCameraInfo(
+                camera_index=camera["camera_index"],
+                sensor_name=camera["sensor_name"],
+                model_name=camera["model_name"],
+                device_path=camera["device_path"],
+                resolutions=tuple(camera["resolutions"]),
+            )
+            for camera in cameras
+        ]
+
+    def _probe_pi_camera_infos(self) -> list[PiCameraInfo]:
         if self.rpicam_executable is None:
             return []
 
@@ -547,25 +636,101 @@ class CameraService:
         except (subprocess.SubprocessError, OSError):
             return []
 
-        matches = re.findall(r"(\d+)x(\d+)", output)
-        if not matches:
+        return self._parse_pi_camera_listing(output)
+
+    @staticmethod
+    def _pi_camera_model_label(info: PiCameraInfo) -> str:
+        if info.model_name:
+            return info.model_name
+        return info.sensor_name.upper()
+
+    def _pi_camera_source_label(self, info: PiCameraInfo) -> str:
+        return f"Pi Camera {info.camera_index + 1} ({self._pi_camera_model_label(info)})"
+
+    def _probe_pi_sources(self) -> list[CameraSource]:
+        if self.rpicam_executable is None:
+            self._pi_camera_infos = ()
             return []
 
-        resolutions = {
-            self._resolution_key(int(width), int(height))
-            for width, height in matches
-        }
-        return sorted(resolutions, key=lambda item: (item[0] * item[1], item[0], item[1]))
+        infos = self._probe_pi_camera_infos()
+        self._pi_camera_infos = tuple(infos)
+        if infos:
+            return [
+                CameraSource(
+                    source_id=f"pi-camera-{info.camera_index}",
+                    label=self._pi_camera_source_label(info),
+                    kind="pi",
+                    available=True,
+                    backend="libcamera",
+                    command=self.rpicam_executable,
+                    camera_index=info.camera_index,
+                    sensor_name=info.sensor_name,
+                    model_name=info.model_name or self._pi_camera_model_label(info),
+                )
+                for info in infos
+            ]
+
+        return [
+            CameraSource(
+                source_id="pi-camera",
+                label="Pi Camera",
+                kind="pi",
+                available=True,
+                backend="libcamera",
+                command=self.rpicam_executable,
+            )
+        ]
+
+    def _pi_camera_info_for_source(self, source: CameraSource | None) -> PiCameraInfo | None:
+        if source is None or source.kind != "pi" or source.camera_index is None:
+            return None
+        for info in self._pi_camera_infos:
+            if info.camera_index == source.camera_index:
+                return info
+        return None
+
+    def _resolution_pairs_for_source(self, source: CameraSource | None) -> list[tuple[int, int]]:
+        info = self._pi_camera_info_for_source(source)
+        if source is not None and source.kind == "pi" and info is not None and info.resolutions:
+            pairs = set(info.resolutions)
+        else:
+            pairs = set(self._default_resolution_pairs())
+            pairs.add(self._resolution_key(self.width, self.height))
+        if info is not None and not pairs:
+            pairs.update(info.resolutions)
+        return sorted(pairs, key=lambda item: (item[0] * item[1], item[0], item[1]))
+
+    def _preferred_resolution_for_source(self, source: CameraSource) -> tuple[int, int]:
+        pairs = self._resolution_pairs_for_source(source)
+        current = self._resolution_key(self.width, self.height)
+        if current in pairs:
+            return current
+
+        target_width, target_height = 1280, 720
+        return min(
+            pairs,
+            key=lambda item: (
+                abs(item[0] - target_width) + abs(item[1] - target_height),
+                item[0] * item[1],
+            ),
+        )
 
     def resolution_options(self) -> list[ResolutionOption]:
-        if self._resolution_options is not None:
+        source = self.active_source()
+        cache_key = (
+            source.source_id if source is not None else None,
+            self.width,
+            self.height,
+        )
+        if self._resolution_options is not None and self._resolution_options_cache_key is None:
+            return list(self._resolution_options)
+        if (
+            self._resolution_options is not None
+            and self._resolution_options_cache_key == cache_key
+        ):
             return list(self._resolution_options)
 
-        pairs = set(self._default_resolution_pairs())
-        pairs.update(self._probe_resolution_pairs())
-        pairs.add(self._resolution_key(self.width, self.height))
-
-        sorted_pairs = sorted(pairs, key=lambda item: (item[0] * item[1], item[0], item[1]))
+        sorted_pairs = self._resolution_pairs_for_source(source)
         max_resolution = max(sorted_pairs, key=lambda item: item[0] * item[1])
         self._resolution_options = tuple(
             ResolutionOption(
@@ -575,6 +740,7 @@ class CameraService:
             )
             for width, height in sorted_pairs
         )
+        self._resolution_options_cache_key = cache_key
         return list(self._resolution_options)
 
     @classmethod
@@ -619,19 +785,6 @@ class CameraService:
         if self._network_camera_url is None:
             raise RuntimeError("ESP32-CAM URL is not configured.")
         return f"{self._network_camera_url}{path}"
-
-    def _probe_pi_source(self) -> CameraSource | None:
-        if self.rpicam_executable is None:
-            return None
-
-        return CameraSource(
-            source_id="pi-camera",
-            label="Pi Camera",
-            kind="pi",
-            available=True,
-            backend="libcamera",
-            command=self.rpicam_executable,
-        )
 
     def _probe_usb_sources(self) -> list[CameraSource]:
         if self.v4l2ctl_executable is None:
@@ -705,6 +858,9 @@ class CameraService:
     def _invalidate_source_cache(self) -> None:
         self._source_cache = None
         self._source_cache_at = 0.0
+        if self._resolution_options_cache_key is not None:
+            self._resolution_options = None
+            self._resolution_options_cache_key = None
 
     def _available_sources(self, refresh: bool = False) -> list[CameraSource]:
         if (
@@ -715,9 +871,7 @@ class CameraService:
             return list(self._source_cache)
 
         sources: list[CameraSource] = []
-        pi_source = self._probe_pi_source()
-        if pi_source is not None:
-            sources.append(pi_source)
+        sources.extend(self._probe_pi_sources())
         sources.extend(self._probe_usb_sources())
         network_source = self._probe_network_source()
         if network_source is not None:
@@ -730,6 +884,18 @@ class CameraService:
         return {source.source_id: source for source in self._available_sources(refresh=refresh)}
 
     def _ensure_selection(self, sources_by_id: dict[str, CameraSource]) -> None:
+        if self._selected_source_id == "pi-camera":
+            pi_sources = sorted(
+                (source for source in sources_by_id.values() if source.kind == "pi"),
+                key=lambda source: (
+                    source.camera_index is None,
+                    source.camera_index if source.camera_index is not None else 0,
+                ),
+            )
+            if pi_sources:
+                self._selected_source_id = pi_sources[0].source_id
+                self._selected_source_name = pi_sources[0].label
+
         if (
             self._selected_source_id is not None
             and self._selected_source_id in sources_by_id
@@ -740,9 +906,16 @@ class CameraService:
         if self._selected_source_id is not None:
             return
 
-        if "pi-camera" in sources_by_id:
-            self._selected_source_id = "pi-camera"
-            self._selected_source_name = sources_by_id["pi-camera"].label
+        pi_sources = sorted(
+            (source for source in sources_by_id.values() if source.kind == "pi"),
+            key=lambda source: (
+                source.camera_index is None,
+                source.camera_index if source.camera_index is not None else 0,
+            ),
+        )
+        if pi_sources:
+            self._selected_source_id = pi_sources[0].source_id
+            self._selected_source_name = pi_sources[0].label
             return
 
         if sources_by_id:
@@ -790,6 +963,9 @@ class CameraService:
                     "command": None,
                     "device": None,
                     "base_url": None,
+                    "camera_index": None,
+                    "sensor_name": None,
+                    "model_name": None,
                     "selected": True,
                 },
             )
@@ -804,6 +980,9 @@ class CameraService:
         selected_source = sources_by_id[source_id]
         self._selected_source_id = selected_source.source_id
         self._selected_source_name = selected_source.label
+        self._invalidate_source_cache()
+        if selected_source.kind == "pi":
+            self.width, self.height = self._preferred_resolution_for_source(selected_source)
         self._save_config()
 
     def active_source(self, refresh: bool = False) -> CameraSource | None:
@@ -817,6 +996,10 @@ class CameraService:
         source = self.active_source()
         if source is None:
             return None
+        if source.kind == "pi" and source.command is not None:
+            if source.camera_index is None:
+                return source.command
+            return f"{source.command} --camera {source.camera_index}"
         return source.base_url or source.device or source.command
 
     def is_available(self, refresh: bool = False) -> bool:
@@ -829,6 +1012,27 @@ class CameraService:
             "height": self.height,
             "options": [asdict(option) for option in self.resolution_options()],
         }
+
+    def focus_preview_resolution(self) -> tuple[int, int]:
+        options = self.resolution_options()
+        if not options:
+            return (self.width, self.height)
+
+        preview_options = [
+            (option.width, option.height)
+            for option in options
+            if option.width * option.height <= 1280 * 720
+        ]
+        if preview_options:
+            return max(
+                preview_options,
+                key=lambda item: (item[0] * item[1], item[0], item[1]),
+            )
+
+        return min(
+            ((option.width, option.height) for option in options),
+            key=lambda item: (item[0] * item[1], item[0], item[1]),
+        )
 
     def latest_snapshot_path(self) -> Path | None:
         if self.snapshot_path.exists():
@@ -884,6 +1088,7 @@ class CameraService:
         width: int,
         height: int,
         quality: int,
+        camera_index: int | None = None,
     ) -> None:
         if self.rpicam_executable is None:
             raise RuntimeError("rpicam-still is not installed on this device.")
@@ -920,6 +1125,8 @@ class CameraService:
             "--denoise",
             self._denoise_mode,
         ]
+        if camera_index is not None:
+            command.extend(["--camera", str(camera_index)])
 
         subprocess.run(
             command,
@@ -1011,7 +1218,13 @@ class CameraService:
         try:
             with self._lock:
                 if source.kind == "pi":
-                    self._capture_pi_image(output_path, width, height, quality)
+                    self._capture_pi_image(
+                        output_path,
+                        width,
+                        height,
+                        quality,
+                        camera_index=source.camera_index,
+                    )
                 elif source.kind == "usb" and source.device is not None:
                     self._capture_usb_image(source.device, output_path, width, height)
                 elif source.kind == "network":

@@ -18,9 +18,25 @@
           <div>
             <p class="eyebrow">Saved Gallery Photos</p>
             <h1>Gallery</h1>
-            <p class="subtle">Photos moved out of the archive stay here until you download or delete them.</p>
+            <p class="subtle">Photos moved out of the archive stay here until you download, delete, or run a slideshow.</p>
           </div>
           <div class="actions compact">
+            <label class="slideshow-control" for="browser-slideshow-speed">
+              <span>Speed</span>
+              <select id="browser-slideshow-speed">
+                <option value="0.5">0.5s</option>
+                <option value="1">1.0s</option>
+                <option value="1.5">1.5s</option>
+                <option value="2" selected>2.0s</option>
+                <option value="2.5">2.5s</option>
+                <option value="3">3.0s</option>
+                <option value="3.5">3.5s</option>
+                <option value="4">4.0s</option>
+                <option value="4.5">4.5s</option>
+                <option value="5">5.0s</option>
+              </select>
+            </label>
+            <button id="browser-slideshow-button" type="button">Start Slideshow</button>
             <button id="browser-select-button" type="button">Select All</button>
             <button id="browser-download-button" type="button">Download Selected</button>
             <button id="browser-delete-button" type="button" class="danger">Delete Selected</button>
@@ -38,6 +54,8 @@
       "downloadUrl": "/api/gallery/download",
       "deleteUrl": "/api/gallery/delete",
       "emptyMessage": "No gallery photos yet.",
+      "slideshowEnabled": true,
+      "defaultSlideshowSpeedSeconds": 2,
       "refreshErrorMessage": "Gallery refresh failed.",
       "downloadErrorMessage": "Download failed.",
       "deleteErrorMessage": "Delete failed.",

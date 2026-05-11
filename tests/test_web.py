@@ -30,6 +30,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("network_camera_url", payload["camera"])
         self.assertIn("burst_count", payload["camera"])
         self.assertIn("rotation_degrees", payload["camera"])
+        self.assertIn("camera_index", payload["camera"])
+        self.assertIn("sensor_name", payload["camera"])
+        self.assertIn("sensor_model", payload["camera"])
         self.assertIn("lighting", payload["camera"])
         self.assertIn("tuning", payload["camera"])
         self.assertIn("options", payload["camera"]["resolution"])
@@ -185,10 +188,16 @@ class WebTests(unittest.TestCase):
                 "events": [],
                 "status": {"motion_events": []},
             },
+        ), patch(
+            "app.monitor.MonitorService.archived_event_day_groups",
+            return_value=[],
+        ), patch(
+            "app.monitor.MonitorService.archived_events_payload",
+            return_value=[],
         ):
             response = client.post(
                 "/api/events/delete",
-                json={"filenames": ["20260416T201700000000Z.jpg"]},
+                json={"filenames": ["20260416T201700000000Z.jpg"], "day_key": "2026-04-16"},
             )
 
         self.assertEqual(response.status_code, 200)
@@ -209,10 +218,16 @@ class WebTests(unittest.TestCase):
                 "gallery": [{"event_id": "20260416T201700000000Z"}],
                 "status": {"motion_events": []},
             },
+        ), patch(
+            "app.monitor.MonitorService.archived_event_day_groups",
+            return_value=[],
+        ), patch(
+            "app.monitor.MonitorService.archived_events_payload",
+            return_value=[],
         ):
             response = client.post(
                 "/api/events/move-to-gallery",
-                json={"filenames": ["20260416T201700000000Z.jpg"]},
+                json={"filenames": ["20260416T201700000000Z.jpg"], "day_key": "2026-04-16"},
             )
 
         self.assertEqual(response.status_code, 200)
@@ -220,20 +235,44 @@ class WebTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["moved_count"], 1)
 
-    def test_events_endpoint_returns_archived_events(self):
+    def test_events_endpoint_returns_archived_events_for_selected_day(self):
         app = create_app(start_detector=False)
         client = app.test_client()
 
         with patch(
+            "app.monitor.MonitorService.archived_event_day_groups",
+            return_value=[
+                {
+                    "day_key": "2026-04-17",
+                    "label": "Friday, April 17, 2026",
+                    "event_count": 2,
+                },
+                {
+                    "day_key": "2026-04-16",
+                    "label": "Thursday, April 16, 2026",
+                    "event_count": 1,
+                },
+            ],
+        ), patch(
             "app.monitor.MonitorService.archived_events_payload",
-            return_value=[{"event_id": "evt-1", "snapshot_url": "/events/evt-1.jpg"}],
-        ):
-            response = client.get("/api/events")
+            return_value=[
+                {
+                    "event_id": "20260416T201700000000Z",
+                    "detected_at": "2026-04-16T20:17:00+00:00",
+                    "snapshot_url": "/events/20260416T201700000000Z.jpg",
+                }
+            ],
+        ) as archived_events_payload:
+            response = client.get("/api/events?day=2026-04-16")
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["events"][0]["event_id"], "evt-1")
+        self.assertEqual(payload["events"][0]["event_id"], "20260416T201700000000Z")
+        self.assertEqual(payload["selected_day_key"], "2026-04-16")
+        self.assertEqual(payload["day_groups"][0]["day_key"], "2026-04-17")
+        self.assertEqual(payload["day_groups"][1]["event_count"], 1)
+        archived_events_payload.assert_called_once_with(day_key="2026-04-16")
 
     def test_gallery_endpoint_returns_gallery_items(self):
         app = create_app(start_detector=False)
@@ -329,6 +368,35 @@ class WebTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             capture_snapshot.assert_called_once_with()
 
+    def test_snapshot_endpoint_preview_uses_focus_preview_resolution(self):
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "latest.jpg"
+            image = Image.new("RGB", (640, 480), color="teal")
+            image.save(snapshot_path, format="JPEG", quality=85)
+
+            app = create_app(start_detector=False)
+
+            with patch.object(CameraService, "focus_preview_resolution", return_value=(640, 480)), patch.object(
+                CameraService,
+                "capture_image",
+                return_value=SnapshotDetails(
+                    exists=True,
+                    path=str(snapshot_path),
+                    modified_at="2026-04-15T22:30:00+00:00",
+                    size_bytes=snapshot_path.stat().st_size,
+                ),
+            ) as capture_image:
+                client = app.test_client()
+                response = client.get("/snapshot.jpg?live=1&preview=1&max_w=304&max_h=172&quality=60")
+
+            self.assertEqual(response.status_code, 200)
+            capture_image.assert_called_once_with(
+                output_path=Path(app.root_path).parent / "data" / "latest.jpg",
+                width=640,
+                height=480,
+                quality=60,
+            )
+
     def test_archive_page_renders_saved_event_downloads(self):
         app = create_app(start_detector=False)
         client = app.test_client()
@@ -344,15 +412,42 @@ class WebTests(unittest.TestCase):
             }
         ]
 
-        with patch("app.monitor.MonitorService.archived_events_payload", return_value=archived_events):
+        with patch(
+            "app.monitor.MonitorService.archived_events_payload",
+            return_value=archived_events,
+        ), patch(
+            "app.monitor.MonitorService.archived_event_day_groups",
+            return_value=[
+                {
+                    "day_key": "2026-04-16",
+                    "label": "Thursday, April 16, 2026",
+                    "event_count": 1,
+                }
+            ],
+        ):
             response = client.get("/archive")
 
         self.assertEqual(response.status_code, 200)
         page = response.get_data(as_text=True)
         self.assertIn("Event Archive", page)
         self.assertIn("Gallery", page)
+        self.assertIn("Move Selected to Gallery", page)
         self.assertIn("Download Selected", page)
         self.assertIn("Delete Selected", page)
+        self.assertIn("Archive Day", page)
+        self.assertIn("Select to Move", page)
+        self.assertIn("Selected for Move", page)
+
+    def test_index_page_renders_focus_preview_controls(self):
+        app = create_app(start_detector=False)
+        client = app.test_client()
+
+        response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Start Focus Preview", page)
+        self.assertIn("Focus preview grabs fresh snapshots", page)
 
     def test_gallery_page_renders_saved_gallery_downloads(self):
         app = create_app(start_detector=False)
@@ -376,6 +471,7 @@ class WebTests(unittest.TestCase):
         page = response.get_data(as_text=True)
         self.assertIn("Gallery", page)
         self.assertIn("Browse Archive", page)
+        self.assertIn("Start Slideshow", page)
         self.assertIn("Download Selected", page)
 
 

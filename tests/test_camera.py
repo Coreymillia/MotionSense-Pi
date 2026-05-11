@@ -6,7 +6,7 @@ from urllib.error import URLError
 
 from PIL import Image
 
-from app.camera import CameraService, CameraSource
+from app.camera import CameraService, CameraSource, PiCameraInfo
 
 
 class CameraServiceTests(unittest.TestCase):
@@ -14,12 +14,15 @@ class CameraServiceTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
             pi_source = CameraSource(
-                source_id="pi-camera",
-                label="Pi Camera",
+                source_id="pi-camera-0",
+                label="Pi Camera 1 (Camera Module v2)",
                 kind="pi",
                 available=True,
                 backend="libcamera",
                 command="/usr/bin/rpicam-still",
+                camera_index=0,
+                sensor_name="imx219",
+                model_name="Camera Module v2",
             )
             usb_source = CameraSource(
                 source_id="usb-video1",
@@ -31,10 +34,10 @@ class CameraServiceTests(unittest.TestCase):
                 device="/dev/video1",
             )
 
-            with patch.object(service, "_probe_pi_source", return_value=pi_source), patch.object(
+            with patch.object(service, "_probe_pi_sources", return_value=[pi_source]), patch.object(
                 service, "_probe_usb_sources", return_value=[usb_source]
             ):
-                self.assertEqual(service.selected_source_id(), "pi-camera")
+                self.assertEqual(service.selected_source_id(), "pi-camera-0")
 
                 service.set_active_source("usb-video1")
 
@@ -49,7 +52,7 @@ class CameraServiceTests(unittest.TestCase):
             service._selected_source_id = "usb-video1"
             service._selected_source_name = "USB Camera (video1)"
 
-            with patch.object(service, "_probe_pi_source", return_value=None), patch.object(
+            with patch.object(service, "_probe_pi_sources", return_value=[]), patch.object(
                 service, "_probe_usb_sources", return_value=[]
             ):
                 payload = service.list_sources()
@@ -62,7 +65,7 @@ class CameraServiceTests(unittest.TestCase):
             service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
             service.set_network_camera_url("esp32-cam.local")
 
-            with patch.object(service, "_probe_pi_source", return_value=None), patch.object(
+            with patch.object(service, "_probe_pi_sources", return_value=[]), patch.object(
                 service, "_probe_usb_sources", return_value=[]
             ), patch("app.camera.urlopen", side_effect=URLError("offline")):
                 payload = service.list_sources()
@@ -74,15 +77,18 @@ class CameraServiceTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
             pi_source = CameraSource(
-                source_id="pi-camera",
-                label="Pi Camera",
+                source_id="pi-camera-0",
+                label="Pi Camera 1 (Camera Module v2)",
                 kind="pi",
                 available=True,
                 backend="libcamera",
                 command="/usr/bin/rpicam-still",
+                camera_index=0,
+                sensor_name="imx219",
+                model_name="Camera Module v2",
             )
 
-            with patch.object(service, "_probe_pi_source", return_value=pi_source) as probe_pi, patch.object(
+            with patch.object(service, "_probe_pi_sources", return_value=[pi_source]) as probe_pi, patch.object(
                 service, "_probe_usb_sources", return_value=[]
             ) as probe_usb, patch.object(service, "_probe_network_source", return_value=None) as probe_network:
                 service.selected_source_id()
@@ -93,6 +99,111 @@ class CameraServiceTests(unittest.TestCase):
             self.assertEqual(probe_pi.call_count, 1)
             self.assertEqual(probe_usb.call_count, 1)
             self.assertEqual(probe_network.call_count, 1)
+
+    def test_parse_pi_camera_listing_extracts_multiple_cameras(self):
+        parsed = CameraService._parse_pi_camera_listing(
+            "\n".join(
+                [
+                    "Available cameras",
+                    "0 : ov5647 [Arducam OV5647]",
+                    "    /base/soc/i2c0mux/i2c@1/ov5647@36",
+                    "    Modes: 640x480 1280x720 2592x1944",
+                    "1 : imx708",
+                    "    /base/soc/i2c0mux/i2c@0/imx708@1a",
+                    "    Model: Camera Module 3",
+                    "    Mode 0: 2304x1296",
+                    "    Mode 1: 4608x2592",
+                ]
+            )
+        )
+
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0].sensor_name, "ov5647")
+        self.assertEqual(parsed[0].model_name, "Arducam OV5647")
+        self.assertIn((2592, 1944), parsed[0].resolutions)
+        self.assertEqual(parsed[1].camera_index, 1)
+        self.assertEqual(parsed[1].model_name, "Camera Module 3")
+        self.assertIn((4608, 2592), parsed[1].resolutions)
+
+    def test_lists_each_detected_pi_camera_as_a_selectable_source(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+
+            with patch.object(
+                service,
+                "_probe_pi_camera_infos",
+                return_value=[
+                    PiCameraInfo(
+                        camera_index=0,
+                        sensor_name="ov5647",
+                        model_name="Arducam OV5647",
+                        device_path="/base/ov5647@36",
+                        resolutions=((640, 480), (2592, 1944)),
+                    ),
+                    PiCameraInfo(
+                        camera_index=1,
+                        sensor_name="imx708",
+                        model_name="Camera Module 3",
+                        device_path="/base/imx708@1a",
+                        resolutions=((2304, 1296), (4608, 2592)),
+                    ),
+                ],
+            ), patch.object(service, "_probe_usb_sources", return_value=[]):
+                payload = service.list_sources(refresh=True)
+
+            self.assertEqual(
+                [item["source_id"] for item in payload],
+                ["pi-camera-0", "pi-camera-1"],
+            )
+            self.assertEqual(payload[0]["model_name"], "Arducam OV5647")
+            self.assertEqual(payload[1]["camera_index"], 1)
+
+    def test_switching_pi_sources_uses_supported_resolution_for_selected_camera(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service.width = 3280
+            service.height = 2464
+
+            with patch.object(
+                service,
+                "_probe_pi_camera_infos",
+                return_value=[
+                    PiCameraInfo(
+                        camera_index=0,
+                        sensor_name="ov5647",
+                        model_name="Arducam OV5647",
+                        device_path="/base/ov5647@36",
+                        resolutions=((1280, 720), (2592, 1944)),
+                    ),
+                    PiCameraInfo(
+                        camera_index=1,
+                        sensor_name="imx708",
+                        model_name="Camera Module 3",
+                        device_path="/base/imx708@1a",
+                        resolutions=((2304, 1296), (4608, 2592)),
+                    ),
+                ],
+            ), patch.object(service, "_probe_usb_sources", return_value=[]):
+                service.set_active_source("pi-camera-1")
+
+            self.assertEqual((service.width, service.height), (2304, 1296))
+
+    def test_pi_capture_command_selects_specific_camera_index(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service.rpicam_executable = "/usr/bin/rpicam-still"
+
+            with patch("app.camera.subprocess.run") as run:
+                service._capture_pi_image(
+                    Path(temp_dir) / "frame.jpg",
+                    width=640,
+                    height=480,
+                    quality=90,
+                    camera_index=1,
+                )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--camera") + 1], "1")
 
     def test_usb_capture_path_writes_output(self):
         with TemporaryDirectory() as temp_dir:
@@ -189,7 +300,7 @@ class CameraServiceTests(unittest.TestCase):
             service.width = 2000
             service.height = 1500
 
-            with patch.object(service, "_probe_resolution_pairs", return_value=[(640, 480), (3280, 2464)]):
+            with patch.object(service, "active_source", return_value=None):
                 options = service.resolution_options()
 
             self.assertIn((2000, 1500), {(option.width, option.height) for option in options})
@@ -204,6 +315,18 @@ class CameraServiceTests(unittest.TestCase):
 
             reloaded = CameraService(snapshot_path=snapshot_path)
             self.assertEqual(reloaded.rotation_degrees(), 180)
+
+    def test_focus_preview_resolution_prefers_best_mode_under_720p(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service._resolution_options = (
+                Mock(width=640, height=480, label="640 x 480"),
+                Mock(width=1280, height=720, label="1280 x 720"),
+                Mock(width=1640, height=1232, label="1640 x 1232"),
+            )
+            service._resolution_options_cache_key = None
+
+            self.assertEqual(service.focus_preview_resolution(), (1280, 720))
 
     def test_lighting_mode_persists_in_camera_config(self):
         with TemporaryDirectory() as temp_dir:
@@ -306,12 +429,15 @@ class CameraServiceTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
             pi_source = CameraSource(
-                source_id="pi-camera",
-                label="Pi Camera",
+                source_id="pi-camera-0",
+                label="Pi Camera 1 (Camera Module v2)",
                 kind="pi",
                 available=True,
                 backend="libcamera",
                 command="/usr/bin/rpicam-still",
+                camera_index=0,
+                sensor_name="imx219",
+                model_name="Camera Module v2",
             )
 
             with patch.object(service, "active_source", return_value=pi_source):

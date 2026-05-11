@@ -18,33 +18,46 @@
           <div>
             <p class="eyebrow">Saved Motion Captures</p>
             <h1>Event Archive</h1>
-            <p class="subtle">Browse and move older motion captures into a separate gallery.</p>
+            <p class="subtle">Browse older motion captures one day at a time and move the keepers into the main gallery.</p>
           </div>
           <div class="actions compact">
             <button id="browser-select-button" type="button">Select All</button>
+            <button id="browser-move-button" type="button">Move Selected to Gallery</button>
             <button id="browser-download-button" type="button">Download Selected</button>
             <button id="browser-delete-button" type="button" class="danger">Delete Selected</button>
           </div>
         </div>
         <p class="subtle archive-meta">Storage path: <code>{{ event_dir }}</code></p>
+        <div class="archive-day-browser">
+          <label class="archive-day-select" for="browser-day-select">
+            <span>Archive Day</span>
+            <select id="browser-day-select"></select>
+          </label>
+          <p id="browser-day-summary" class="subtle archive-day-summary"></p>
+        </div>
 
         <div id="browser-message" class="message" aria-live="polite"></div>
         <div id="browser-event-list" class="event-list"></div>
       </section>
     </main>
-    <script id="browser-events" type="application/json">{{ events | tojson }}</script>
+    <script id="browser-events" type="application/json">{{ browser_payload | tojson }}</script>
     <script id="browser-config" type="application/json">{{ {
       "listUrl": "/api/events",
       "downloadUrl": "/api/events/download",
       "deleteUrl": "/api/events/delete",
       "moveUrl": "/api/events/move-to-gallery",
+      "prioritizeSelection": true,
+      "selectButtonLabel": "Select to Move",
+      "selectedButtonLabel": "Selected for Move",
+      "openButtonLabel": "Open Preview",
       "emptyMessage": "No saved motion events yet.",
       "refreshErrorMessage": "Archive refresh failed.",
       "downloadErrorMessage": "Download failed.",
       "deleteErrorMessage": "Delete failed.",
       "deleteProgressMessage": "Deleting event photos...",
+      "dayBrowseEnabled": true,
       "moveErrorMessage": "Move failed.",
-      "moveProgressMessage": "Moving photo to gallery...",
+      "moveProgressMessage": "Moving photos to gallery...",
       "moveButtonLabel": "Move to Gallery"
     } | tojson }}</script>
     <script src="{{ url_for('static', filename='event-browser.js') }}"></script>

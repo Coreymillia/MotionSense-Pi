@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 from threading import Event, Lock, Thread
 import shutil
 import time
@@ -196,11 +197,16 @@ class MotionDetector:
         with self._lock:
             return self._motion_epoch, self._last_motion_at
 
-    def archived_events_payload(self, limit: int | None = None) -> list[dict[str, Any]]:
+    def archived_events_payload(
+        self,
+        limit: int | None = None,
+        day_key: str | None = None,
+    ) -> list[dict[str, Any]]:
         return self._records_payload_for_directory(
             directory=self.event_dir,
             url_prefix="/events",
             limit=limit,
+            day_key=day_key,
         )
 
     def gallery_payload(self, limit: int | None = None) -> list[dict[str, Any]]:
@@ -209,6 +215,9 @@ class MotionDetector:
             url_prefix="/gallery-images",
             limit=limit,
         )
+
+    def archived_event_day_groups(self) -> list[dict[str, Any]]:
+        return self._day_groups_for_directory(self.event_dir)
 
     def archived_event_count(self) -> int:
         return sum(
@@ -311,8 +320,13 @@ class MotionDetector:
         directory: Path,
         url_prefix: str,
         limit: int | None = None,
+        day_key: str | None = None,
     ) -> list[dict[str, Any]]:
         image_paths = sorted(self._image_paths_for_directory(directory), reverse=True)
+        if day_key is not None:
+            image_paths = [
+                path for path in image_paths if self._day_key_for_path(path) == day_key
+            ]
         if limit is not None:
             image_paths = image_paths[: max(limit, 0)]
         return [asdict(self._event_record_for_path(path, url_prefix=url_prefix)) for path in image_paths]
@@ -349,6 +363,41 @@ class MotionDetector:
 
     def _metadata_path_for_event(self, path: Path) -> Path:
         return path.with_suffix(".json")
+
+    def _day_key_for_path(self, path: Path) -> str:
+        match = re.match(r"^(\d{4})(\d{2})(\d{2})T", path.stem)
+        if match is not None:
+            return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+
+        metadata = self._load_event_metadata(path)
+        detected_at = metadata.get("detected_at")
+        if isinstance(detected_at, str) and len(detected_at) >= 10:
+            return detected_at[:10]
+
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).date().isoformat()
+
+    def _day_label_for_key(self, day_key: str) -> str:
+        if day_key == "unknown-day":
+            return "Unknown Day"
+        try:
+            return datetime.fromisoformat(day_key).strftime("%A, %B %d, %Y")
+        except ValueError:
+            return day_key
+
+    def _day_groups_for_directory(self, directory: Path) -> list[dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = {}
+        for path in sorted(self._image_paths_for_directory(directory), reverse=True):
+            day_key = self._day_key_for_path(path)
+            group = grouped.get(day_key)
+            if group is None:
+                group = {
+                    "day_key": day_key,
+                    "label": self._day_label_for_key(day_key),
+                    "event_count": 0,
+                }
+                grouped[day_key] = group
+            group["event_count"] += 1
+        return list(grouped.values())
 
     def _write_event_metadata(
         self,

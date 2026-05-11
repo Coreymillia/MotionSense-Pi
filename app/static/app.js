@@ -33,6 +33,8 @@ const message = document.getElementById("message");
 const snapshotImage = document.getElementById("snapshot-image");
 const snapshotEmpty = document.getElementById("snapshot-empty");
 const snapshotMeta = document.getElementById("snapshot-meta");
+const focusPreviewButton = document.getElementById("focus-preview-button");
+const focusPreviewNote = document.getElementById("focus-preview-note");
 const cameraLightingNote = document.getElementById("camera-lighting-note");
 const cameraTuningNote = document.getElementById("camera-tuning-note");
 const timerModeNote = document.getElementById("timer-mode-note");
@@ -43,9 +45,17 @@ const eventList = document.getElementById("event-list");
 const eventsSelectButton = document.getElementById("events-select-button");
 const eventsDownloadButton = document.getElementById("events-download-button");
 const eventsDeleteButton = document.getElementById("events-delete-button");
+let latestStatus = initialStatus;
 let currentEvents = [];
 const selectedEventFilenames = new Set();
 const eventLightbox = createEventLightbox();
+let focusPreviewActive = false;
+let focusPreviewRequestInFlight = false;
+let focusPreviewTimerId = null;
+let focusPreviewSession = 0;
+let focusPreviewObjectUrl = null;
+const focusPreviewIntervalMs = 900;
+const focusPreviewUrl = "/snapshot.jpg?live=1&preview=1&max_w=960&max_h=720&quality=70";
 
 function createEventLightbox() {
   const overlay = document.createElement("div");
@@ -153,6 +163,129 @@ function addDefinitionRow(container, label, value) {
   container.append(row);
 }
 
+function clearFocusPreviewObjectUrl() {
+  if (focusPreviewObjectUrl !== null) {
+    window.URL.revokeObjectURL(focusPreviewObjectUrl);
+    focusPreviewObjectUrl = null;
+  }
+}
+
+function syncFocusPreviewControls(cameraData = latestStatus?.camera) {
+  const cameraAvailable = Boolean(cameraData?.available);
+  focusPreviewButton.disabled = !focusPreviewActive && !cameraAvailable;
+  focusPreviewButton.textContent = focusPreviewActive
+    ? "Stop Focus Preview"
+    : "Start Focus Preview";
+  focusPreviewButton.classList.toggle("preview-active", focusPreviewActive);
+  focusPreviewNote.textContent = focusPreviewActive
+    ? "Focus preview is running with fresh snapshots about every second. Motion and auto capture stay paused while you focus."
+    : "Focus preview grabs fresh snapshots about every second so you can adjust manual-focus lenses like the OV5647.";
+}
+
+function stopFocusPreview({ restoreSnapshot = true } = {}) {
+  focusPreviewActive = false;
+  focusPreviewSession += 1;
+  if (focusPreviewTimerId !== null) {
+    window.clearTimeout(focusPreviewTimerId);
+    focusPreviewTimerId = null;
+  }
+  clearFocusPreviewObjectUrl();
+  focusPreviewRequestInFlight = false;
+  if (restoreSnapshot && latestStatus?.snapshot) {
+    renderSnapshot(latestStatus.snapshot);
+  }
+  syncFocusPreviewControls(latestStatus?.camera);
+}
+
+async function pauseBackgroundCaptureForFocusPreview() {
+  if (latestStatus?.motion?.armed) {
+    const response = await fetch("/api/motion/stop", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Focus preview could not pause motion detection.");
+    }
+    renderStatus(payload.status);
+  }
+
+  if (latestStatus?.timer?.armed) {
+    const response = await fetch("/api/timer/stop", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Focus preview could not stop auto capture.");
+    }
+    renderStatus(payload.status);
+  }
+}
+
+async function requestFocusPreviewFrame() {
+  if (!focusPreviewActive || focusPreviewRequestInFlight) {
+    return;
+  }
+
+  const session = focusPreviewSession;
+  focusPreviewRequestInFlight = true;
+  try {
+    const response = await fetch(`${focusPreviewUrl}&t=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error((await response.text()) || "Focus preview capture failed.");
+    }
+
+    const blob = await response.blob();
+    if (!focusPreviewActive || session !== focusPreviewSession) {
+      return;
+    }
+
+    clearFocusPreviewObjectUrl();
+    focusPreviewObjectUrl = window.URL.createObjectURL(blob);
+    snapshotImage.src = focusPreviewObjectUrl;
+    snapshotImage.classList.remove("hidden");
+    snapshotEmpty.classList.add("hidden");
+    snapshotMeta.textContent = "Focus preview active. Fresh snapshots update about every second.";
+  } catch (error) {
+    if (session === focusPreviewSession) {
+      stopFocusPreview();
+      message.textContent = error.message || "Focus preview failed.";
+      void refreshStatus();
+    }
+    return;
+  } finally {
+    if (session === focusPreviewSession) {
+      focusPreviewRequestInFlight = false;
+    }
+  }
+
+  if (focusPreviewActive && session === focusPreviewSession) {
+    focusPreviewTimerId = window.setTimeout(() => {
+      void requestFocusPreviewFrame();
+    }, focusPreviewIntervalMs);
+  }
+}
+
+async function toggleFocusPreview() {
+  if (focusPreviewActive) {
+    stopFocusPreview();
+    message.textContent = "Focus preview stopped.";
+    return;
+  }
+
+  message.textContent = "Starting focus preview...";
+  try {
+    await pauseBackgroundCaptureForFocusPreview();
+    focusPreviewActive = true;
+    focusPreviewSession += 1;
+    syncFocusPreviewControls(latestStatus?.camera);
+    await requestFocusPreviewFrame();
+    if (focusPreviewActive) {
+      message.textContent = "Focus preview running. Rotate the lens slowly until edges sharpen.";
+    }
+  } catch (error) {
+    stopFocusPreview();
+    message.textContent = error.message || "Focus preview failed to start.";
+  }
+}
+
 function renderSenseHat(data) {
   senseHatPanel.innerHTML = "";
   if (!data.available) {
@@ -187,6 +320,10 @@ function renderCamera(data) {
   document.getElementById("camera-available").textContent = data.available ? "Yes" : "No";
   document.getElementById("camera-source-name").textContent = data.active_source_name || "Unavailable";
   document.getElementById("camera-backend").textContent = data.backend || "Unavailable";
+  document.getElementById("camera-sensor-model").textContent =
+    data.sensor_model || data.sensor_name || "N/A";
+  document.getElementById("camera-index").textContent =
+    Number.isInteger(data.camera_index) ? `${data.camera_index + 1}` : "N/A";
   document.getElementById("camera-target").textContent = data.target || "Unavailable";
   document.getElementById("camera-resolution").textContent =
     `${data.resolution.width} x ${data.resolution.height}`;
@@ -406,24 +543,28 @@ function renderEvents(events) {
     const filename = event.snapshot_url.split("/").pop() || "motion-event.jpg";
     card.dataset.filename = filename;
 
-    const selection = document.createElement("label");
+    const selection = document.createElement("button");
     selection.className = "event-select";
+    selection.type = "button";
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selectedEventFilenames.has(filename);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) {
-        selectedEventFilenames.add(filename);
-      } else {
+    function syncSelectionState() {
+      const isSelected = selectedEventFilenames.has(filename);
+      selection.classList.toggle("selected", isSelected);
+      selection.setAttribute("aria-pressed", isSelected ? "true" : "false");
+      selection.textContent = isSelected ? "Selected" : "Select Photo";
+      card.classList.toggle("selected", isSelected);
+    }
+
+    selection.addEventListener("click", () => {
+      if (selectedEventFilenames.has(filename)) {
         selectedEventFilenames.delete(filename);
+      } else {
+        selectedEventFilenames.add(filename);
       }
+      syncSelectionState();
       updateEventActionButtons();
     });
-
-    const selectionLabel = document.createElement("span");
-    selectionLabel.textContent = "Select";
-    selection.append(checkbox, selectionLabel);
+    syncSelectionState();
 
     const imageLink = document.createElement("a");
     imageLink.className = "event-image-link";
@@ -505,6 +646,7 @@ function renderSnapshot(snapshot) {
 }
 
 function renderStatus(status) {
+  latestStatus = status;
   document.getElementById("host-name").textContent = status.host;
   document.getElementById("generated-at").textContent = status.generated_at;
   renderCamera(status.camera);
@@ -519,8 +661,11 @@ function renderStatus(status) {
     motionCooldown.value = `${status.motion.cooldown_seconds}`;
     motionThreshold.value = `${status.motion.motion_threshold}`;
   }
-  renderSnapshot(status.snapshot);
+  if (!focusPreviewActive) {
+    renderSnapshot(status.snapshot);
+  }
   renderEvents(status.motion_events || []);
+  syncFocusPreviewControls(status.camera);
 }
 
 async function refreshStatus() {
@@ -531,6 +676,7 @@ async function refreshStatus() {
 }
 
 async function captureSnapshot() {
+  stopFocusPreview({ restoreSnapshot: false });
   message.textContent = "Capturing snapshot...";
   const response = await fetch("/api/capture", { method: "POST" });
   const payload = await response.json();
@@ -545,6 +691,7 @@ async function captureSnapshot() {
 }
 
 async function setMotionState(endpoint, successMessage) {
+  stopFocusPreview({ restoreSnapshot: false });
   message.textContent = "Updating motion detector...";
   const response = await fetch(endpoint, { method: "POST" });
   const payload = await response.json();
@@ -563,6 +710,7 @@ async function setCameraSource() {
     return;
   }
 
+  stopFocusPreview({ restoreSnapshot: false });
   message.textContent = "Switching camera source...";
   const response = await fetch("/api/camera/source", {
     method: "POST",
@@ -583,6 +731,7 @@ async function setCameraSource() {
 }
 
 async function saveNetworkCameraUrl() {
+  stopFocusPreview({ restoreSnapshot: false });
   message.textContent = "Saving ESP32-CAM URL...";
   const response = await fetch("/api/camera/network", {
     method: "POST",
@@ -603,6 +752,7 @@ async function saveNetworkCameraUrl() {
 }
 
 async function rotateCamera() {
+  stopFocusPreview({ restoreSnapshot: false });
   message.textContent = "Rotating camera...";
   rotateButton.disabled = true;
   const response = await fetch("/api/camera/rotate", { method: "POST" });
@@ -619,6 +769,7 @@ async function rotateCamera() {
 }
 
 async function saveSettings() {
+  stopFocusPreview({ restoreSnapshot: false });
   const burstCount = Number.parseInt(captureBurstCount.value, 10);
   if (Number.isNaN(burstCount)) {
     message.textContent = "Choose a burst count between 1 and 5.";
@@ -700,6 +851,7 @@ async function saveSettings() {
 }
 
 async function startTimer() {
+  stopFocusPreview({ restoreSnapshot: false });
   const intervalValue = Number.parseInt(timerIntervalValue.value, 10);
   if (Number.isNaN(intervalValue) || intervalValue < 1) {
     message.textContent = "Enter a timer interval of at least 1.";
@@ -841,6 +993,9 @@ async function deleteEvents(filenames) {
 
 captureButton.addEventListener("click", () => {
   void captureSnapshot();
+});
+focusPreviewButton.addEventListener("click", () => {
+  void toggleFocusPreview();
 });
 timerStartButton.addEventListener("click", () => {
   void startTimer();

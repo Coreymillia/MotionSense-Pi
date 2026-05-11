@@ -44,6 +44,9 @@ class MonitorService:
                 "active_source_id": self.camera.selected_source_id(),
                 "active_source_name": self.camera.selected_source_name(),
                 "backend": active_source.backend if active_source is not None else None,
+                "camera_index": active_source.camera_index if active_source is not None else None,
+                "sensor_name": active_source.sensor_name if active_source is not None else None,
+                "sensor_model": active_source.model_name if active_source is not None else None,
                 "network_camera_url": self.camera.network_camera_url(),
                 "burst_count": self.camera.burst_count(),
                 "rotation_degrees": self.camera.rotation_degrees(),
@@ -86,10 +89,19 @@ class MonitorService:
             "status": self.status_payload(),
         }
 
-    def archived_events_payload(self, limit: int | None = None) -> list[dict[str, object]]:
+    def archived_events_payload(
+        self,
+        limit: int | None = None,
+        day_key: str | None = None,
+    ) -> list[dict[str, object]]:
         if self.motion_detector is None:
             return []
-        return self.motion_detector.archived_events_payload(limit=limit)
+        return self.motion_detector.archived_events_payload(limit=limit, day_key=day_key)
+
+    def archived_event_day_groups(self) -> list[dict[str, object]]:
+        if self.motion_detector is None:
+            return []
+        return self.motion_detector.archived_event_day_groups()
 
     def gallery_payload(self, limit: int | None = None) -> list[dict[str, object]]:
         if self.motion_detector is None:

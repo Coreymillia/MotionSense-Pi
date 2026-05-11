@@ -1,6 +1,6 @@
 # MotionSense Pi
 
-MotionSense Pi is a snapshot-first smart room monitor built around a Raspberry Pi 3 B, Pi Camera v2.1, Sense HAT, an optional USB webcam, an ESP32-CAM network camera, and a CYD touchscreen companion.
+MotionSense Pi is a snapshot-first smart room monitor built around a Raspberry Pi 3 B, Raspberry Pi CSI cameras such as the Pi Camera v2.1, Arducam OV5647, and Camera Module 3, a Sense HAT, an optional USB webcam, an ESP32-CAM network camera, and a CYD touchscreen companion.
 
 It started as a custom build inspired by the product direction of motionEye, but the codebase here is original and tailored to this hardware stack.
 
@@ -8,10 +8,11 @@ It started as a custom build inspired by the product direction of motionEye, but
 
 - serves a local Flask dashboard on port `8080`
 - captures snapshots from:
-  - the Pi Camera with `rpicam-still`
+  - detected Raspberry Pi CSI cameras with `rpicam-still`
   - a USB webcam with `v4l2-ctl`
   - an ESP32-CAM over HTTP
 - lets you switch camera sources from the browser UI and CYD
+- exposes each detected Raspberry Pi CSI camera as its own selectable source
 - can run timed interval captures for stop-motion-style snapshots
 - stores the latest snapshot plus recent motion-triggered events
 - keeps recent events and archive views aligned with the saved event files on disk
@@ -33,7 +34,7 @@ It started as a custom build inspired by the product direction of motionEye, but
 ## Current system layout
 
 ```text
-Pi Camera / USB Webcam / ESP32-CAM
+Pi CSI Cameras / USB Webcam / ESP32-CAM
                 |
                 v
          MotionSense Pi Flask app
@@ -49,7 +50,7 @@ Pi Camera / USB Webcam / ESP32-CAM
 ### Raspberry Pi app
 
 - `app/camera.py`  
-  camera-source abstraction, source switching, Pi/USB/network capture, persisted camera config
+  camera-source abstraction, multi-camera source switching, Pi/USB/network capture, persisted camera config
 
 - `app/motion.py`  
   background motion detector, event history, low-resolution probe captures
@@ -80,10 +81,11 @@ The browser dashboard supports:
   - indoor
   - low light
 - one-click 90 degree camera rotation with persisted orientation for live and saved images
-- camera source selection for the Pi Camera, supported USB webcams, and optional ESP32-CAM
+- camera source selection for each detected Pi CSI camera, supported USB webcams, and optional ESP32-CAM
 - ESP32-CAM URL storage
 - motion detector arm/pause
 - latest snapshot view from the saved `latest.jpg`
+- one-click focus preview mode that refreshes live snapshots so manual-focus lenses can be adjusted
 - recent motion and timed-capture previews that show the whole image without thumbnail cropping
 - click-to-open fullscreen event viewer with keyboard navigation:
   - left arrow for previous image
@@ -294,6 +296,14 @@ Python tests:
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+Pi camera detection:
+
+```bash
+rpicam-still --list-cameras
+```
+
+When multiple CSI cameras are attached, MotionSense Pi lists each one separately in the **Use Camera** selector and routes captures through the matching `--camera` index.
 
 Firmware builds:
 

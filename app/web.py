@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-import re
 import subprocess
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -49,6 +48,42 @@ def create_app(start_detector: bool = True) -> Flask:
     if start_detector:
         motion_detector.start()
 
+    def requested_archive_day_key(payload: dict[str, object] | None = None) -> str | None:
+        candidate: object | None
+        if payload is None:
+            candidate = request.args.get("day")
+        else:
+            candidate = payload.get("day_key")
+
+        if not isinstance(candidate, str):
+            return None
+        normalized = candidate.strip()
+        return normalized or None
+
+    def archive_browser_payload(day_key: str | None = None) -> dict[str, object]:
+        day_groups = monitor.archived_event_day_groups()
+        available_day_keys = {
+            group["day_key"]
+            for group in day_groups
+            if isinstance(group.get("day_key"), str)
+        }
+
+        selected_day_key = day_key if day_key in available_day_keys else None
+        if selected_day_key is None and day_groups:
+            first_day_key = day_groups[0].get("day_key")
+            if isinstance(first_day_key, str):
+                selected_day_key = first_day_key
+
+        return {
+            "events": (
+                monitor.archived_events_payload(day_key=selected_day_key)
+                if selected_day_key is not None
+                else []
+            ),
+            "day_groups": day_groups,
+            "selected_day_key": selected_day_key,
+        }
+
     def send_jpeg(path: Path):
         max_w = request.args.get("max_w", type=int)
         max_h = request.args.get("max_h", type=int)
@@ -75,9 +110,10 @@ def create_app(start_detector: bool = True) -> Flask:
 
     @app.get("/archive")
     def archive() -> str:
+        browser_payload = archive_browser_payload()
         return render_template(
             "archive.html",
-            events=monitor.archived_events_payload(),
+            browser_payload=browser_payload,
             event_dir=str(event_dir),
         )
 
@@ -198,6 +234,8 @@ def create_app(start_detector: bool = True) -> Flask:
 
     @app.post("/api/settings")
     def api_settings():
+        import re
+
         payload = request.get_json(silent=True) or {}
         has_poll_interval = "poll_interval_seconds" in payload
         has_burst_count = "burst_count" in payload
@@ -319,25 +357,43 @@ def create_app(start_detector: bool = True) -> Flask:
 
     @app.post("/api/events/delete")
     def api_events_delete():
+        request_payload = request.get_json(silent=True) or {}
         filenames = payload_filenames()
         if isinstance(filenames, tuple):
             return jsonify(filenames[0]), filenames[1]
 
         try:
             payload = monitor.delete_events(filenames)
-            return jsonify({"ok": True, **payload})
+            return jsonify(
+                {
+                    "ok": True,
+                    **payload,
+                    **archive_browser_payload(
+                        day_key=requested_archive_day_key(request_payload)
+                    ),
+                }
+            )
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
     @app.post("/api/events/move-to-gallery")
     def api_events_move_to_gallery():
+        request_payload = request.get_json(silent=True) or {}
         filenames = payload_filenames()
         if isinstance(filenames, tuple):
             return jsonify(filenames[0]), filenames[1]
 
         try:
             payload = monitor.move_events_to_gallery(filenames)
-            return jsonify({"ok": True, **payload})
+            return jsonify(
+                {
+                    "ok": True,
+                    **payload,
+                    **archive_browser_payload(
+                        day_key=requested_archive_day_key(request_payload)
+                    ),
+                }
+            )
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
@@ -373,7 +429,7 @@ def create_app(start_detector: bool = True) -> Flask:
 
     @app.get("/api/events")
     def api_events():
-        return jsonify({"ok": True, "events": monitor.archived_events_payload()})
+        return jsonify({"ok": True, **archive_browser_payload(requested_archive_day_key())})
 
     @app.post("/api/gallery/delete")
     def api_gallery_delete():
@@ -407,9 +463,21 @@ def create_app(start_detector: bool = True) -> Flask:
     @app.get("/snapshot.jpg")
     def snapshot_image():
         live = request.args.get("live", type=int) == 1
+        preview = request.args.get("preview", type=int) == 1
         if live:
             try:
-                snapshot_file = Path(camera.capture_snapshot().path)
+                if preview:
+                    preview_width, preview_height = camera.focus_preview_resolution()
+                    snapshot_file = Path(
+                        camera.capture_image(
+                            output_path=snapshot_path,
+                            width=preview_width,
+                            height=preview_height,
+                            quality=60,
+                        ).path
+                    )
+                else:
+                    snapshot_file = Path(camera.capture_snapshot().path)
             except RuntimeError as exc:
                 sense_hat.show_status("camera-error")
                 return str(exc), 500

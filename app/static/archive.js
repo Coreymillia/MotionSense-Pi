@@ -162,24 +162,28 @@ function renderArchiveEvents(events) {
     const body = document.createElement("div");
     body.className = "event-card-body";
 
-    const selection = document.createElement("label");
+    const selection = document.createElement("button");
     selection.className = "event-select";
+    selection.type = "button";
 
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selectedArchiveFilenames.has(filename);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) {
-        selectedArchiveFilenames.add(filename);
-      } else {
+    function syncSelectionState() {
+      const isSelected = selectedArchiveFilenames.has(filename);
+      selection.classList.toggle("selected", isSelected);
+      selection.setAttribute("aria-pressed", isSelected ? "true" : "false");
+      selection.textContent = isSelected ? "Selected" : "Select Photo";
+      card.classList.toggle("selected", isSelected);
+    }
+
+    selection.addEventListener("click", () => {
+      if (selectedArchiveFilenames.has(filename)) {
         selectedArchiveFilenames.delete(filename);
+      } else {
+        selectedArchiveFilenames.add(filename);
       }
+      syncSelectionState();
       updateArchiveActionButtons();
     });
-
-    const selectionLabel = document.createElement("span");
-    selectionLabel.textContent = "Select";
-    selection.append(checkbox, selectionLabel);
+    syncSelectionState();
 
     const title = document.createElement("h3");
     title.textContent = new Date(event.detected_at).toLocaleString();

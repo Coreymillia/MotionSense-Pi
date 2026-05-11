@@ -45,6 +45,20 @@
               <dd id="camera-backend">{{ status.camera.backend or "Unavailable" }}</dd>
             </div>
             <div>
+              <dt>Sensor / Model</dt>
+              <dd id="camera-sensor-model">{{ status.camera.sensor_model or status.camera.sensor_name or "N/A" }}</dd>
+            </div>
+            <div>
+              <dt>Camera Slot</dt>
+              <dd id="camera-index">
+                {% if status.camera.camera_index is not none %}
+                  {{ status.camera.camera_index + 1 }}
+                {% else %}
+                  N/A
+                {% endif %}
+              </dd>
+            </div>
+            <div>
               <dt>Target</dt>
               <dd id="camera-target">{{ status.camera.target or "Unavailable" }}</dd>
             </div>
@@ -333,9 +347,13 @@
             </p>
           </div>
           <div class="actions compact">
+            <button id="focus-preview-button" type="button">Start Focus Preview</button>
             <button id="rotate-button" type="button">Rotate 90&deg;</button>
           </div>
         </div>
+        <p id="focus-preview-note" class="subtle focus-preview-note">
+          Focus preview grabs fresh snapshots about every second so you can adjust manual-focus lenses like the OV5647.
+        </p>
         <div class="snapshot-frame">
             <img
               id="snapshot-image"
