@@ -13,6 +13,7 @@ from app.camera import CameraService
 from app.monitor import MonitorService
 from app.motion import MotionDetector
 from app.sensehat import SenseHatService
+from app.stormwatch import StormwatchDetector
 from app.timed_capture import TimedCaptureService
 
 
@@ -23,6 +24,9 @@ def create_app(start_detector: bool = True) -> Flask:
     snapshot_path = data_dir / "latest.jpg"
     event_dir = data_dir / "events"
     gallery_dir = data_dir / "gallery"
+    stormwatch_dir = data_dir / "stormwatch"
+    stormwatch_event_dir = stormwatch_dir / "events"
+    stormwatch_gallery_dir = stormwatch_dir / "gallery"
 
     camera = CameraService(snapshot_path=snapshot_path)
     sense_hat = SenseHatService()
@@ -34,6 +38,13 @@ def create_app(start_detector: bool = True) -> Flask:
         gallery_dir=gallery_dir,
         config_path=data_dir / "motion_config.json",
     )
+    stormwatch_detector = StormwatchDetector(
+        camera=camera,
+        sense_hat=sense_hat,
+        event_dir=stormwatch_event_dir,
+        gallery_dir=stormwatch_gallery_dir,
+        config_path=stormwatch_dir / "stormwatch_config.json",
+    )
     timed_capture = TimedCaptureService(
         motion_detector=motion_detector,
         sense_hat=sense_hat,
@@ -43,6 +54,7 @@ def create_app(start_detector: bool = True) -> Flask:
         camera=camera,
         sense_hat=sense_hat,
         motion_detector=motion_detector,
+        stormwatch_detector=stormwatch_detector,
         timed_capture=timed_capture,
     )
     if start_detector:
@@ -77,6 +89,30 @@ def create_app(start_detector: bool = True) -> Flask:
         return {
             "events": (
                 monitor.archived_events_payload(day_key=selected_day_key)
+                if selected_day_key is not None
+                else []
+            ),
+            "day_groups": day_groups,
+            "selected_day_key": selected_day_key,
+        }
+
+    def stormwatch_archive_browser_payload(day_key: str | None = None) -> dict[str, object]:
+        day_groups = monitor.stormwatch_archived_event_day_groups()
+        available_day_keys = {
+            group["day_key"]
+            for group in day_groups
+            if isinstance(group.get("day_key"), str)
+        }
+
+        selected_day_key = day_key if day_key in available_day_keys else None
+        if selected_day_key is None and day_groups:
+            first_day_key = day_groups[0].get("day_key")
+            if isinstance(first_day_key, str):
+                selected_day_key = first_day_key
+
+        return {
+            "events": (
+                monitor.stormwatch_archived_events_payload(day_key=selected_day_key)
                 if selected_day_key is not None
                 else []
             ),
@@ -125,6 +161,22 @@ def create_app(start_detector: bool = True) -> Flask:
             gallery_dir=str(gallery_dir),
         )
 
+    @app.get("/stormwatch")
+    def stormwatch_home() -> str:
+        return render_template(
+            "stormwatch_archive.html",
+            browser_payload=stormwatch_archive_browser_payload(),
+            event_dir=str(stormwatch_event_dir),
+        )
+
+    @app.get("/stormwatch/gallery")
+    def stormwatch_gallery() -> str:
+        return render_template(
+            "stormwatch_gallery.html",
+            events=monitor.stormwatch_gallery_payload(),
+            gallery_dir=str(stormwatch_gallery_dir),
+        )
+
     def payload_filenames() -> list[str] | tuple[dict[str, object], int]:
         payload = request.get_json(silent=True) or {}
         filenames = payload.get("filenames")
@@ -162,6 +214,20 @@ def create_app(start_detector: bool = True) -> Flask:
     def api_motion_stop():
         try:
             return jsonify({"ok": True, "status": monitor.stop_motion_detection()})
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.post("/api/stormwatch/start")
+    def api_stormwatch_start():
+        try:
+            return jsonify({"ok": True, "status": monitor.start_stormwatch_detection()})
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
+    @app.post("/api/stormwatch/stop")
+    def api_stormwatch_stop():
+        try:
+            return jsonify({"ok": True, "status": monitor.stop_stormwatch_detection()})
         except RuntimeError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 500
 
@@ -247,8 +313,16 @@ def create_app(start_detector: bool = True) -> Flask:
         has_saturation = "saturation" in payload
         has_sharpness = "sharpness" in payload
         has_denoise = "denoise_mode" in payload
+        has_autofocus_mode = "autofocus_mode" in payload
+        has_autofocus_range = "autofocus_range" in payload
+        has_lens_position = "lens_position" in payload
         has_cooldown = "cooldown_seconds" in payload
         has_threshold = "motion_threshold" in payload
+        has_stormwatch_poll_interval = "stormwatch_poll_interval_seconds" in payload
+        has_stormwatch_cooldown = "stormwatch_cooldown_seconds" in payload
+        has_stormwatch_trigger = "stormwatch_score_trigger" in payload
+        has_stormwatch_hot_pixels = "stormwatch_hot_pixel_threshold" in payload
+        has_stormwatch_buffer = "stormwatch_buffer_size" in payload
         if (
             not has_poll_interval
             and not has_burst_count
@@ -260,8 +334,16 @@ def create_app(start_detector: bool = True) -> Flask:
             and not has_saturation
             and not has_sharpness
             and not has_denoise
+            and not has_autofocus_mode
+            and not has_autofocus_range
+            and not has_lens_position
             and not has_cooldown
             and not has_threshold
+            and not has_stormwatch_poll_interval
+            and not has_stormwatch_cooldown
+            and not has_stormwatch_trigger
+            and not has_stormwatch_hot_pixels
+            and not has_stormwatch_buffer
         ):
             return jsonify({"ok": False, "error": "At least one setting is required."}), 400
 
@@ -275,8 +357,26 @@ def create_app(start_detector: bool = True) -> Flask:
         saturation = payload.get("saturation") if has_saturation else None
         sharpness = payload.get("sharpness") if has_sharpness else None
         denoise_mode = payload.get("denoise_mode") if has_denoise else None
+        autofocus_mode = payload.get("autofocus_mode") if has_autofocus_mode else None
+        autofocus_range = payload.get("autofocus_range") if has_autofocus_range else None
+        lens_position = payload.get("lens_position") if has_lens_position else None
         cooldown = payload.get("cooldown_seconds") if has_cooldown else None
         threshold = payload.get("motion_threshold") if has_threshold else None
+        stormwatch_poll_interval = (
+            payload.get("stormwatch_poll_interval_seconds") if has_stormwatch_poll_interval else None
+        )
+        stormwatch_cooldown = (
+            payload.get("stormwatch_cooldown_seconds") if has_stormwatch_cooldown else None
+        )
+        stormwatch_trigger = (
+            payload.get("stormwatch_score_trigger") if has_stormwatch_trigger else None
+        )
+        stormwatch_hot_pixels = (
+            payload.get("stormwatch_hot_pixel_threshold") if has_stormwatch_hot_pixels else None
+        )
+        stormwatch_buffer = (
+            payload.get("stormwatch_buffer_size") if has_stormwatch_buffer else None
+        )
 
         if has_poll_interval and (
             isinstance(poll_interval, bool) or not isinstance(poll_interval, (int, float))
@@ -304,6 +404,14 @@ def create_app(start_detector: bool = True) -> Flask:
             return jsonify({"ok": False, "error": "white_balance_mode must be a preset name."}), 400
         if has_denoise and not isinstance(denoise_mode, str):
             return jsonify({"ok": False, "error": "denoise_mode must be a preset name."}), 400
+        if has_autofocus_mode and not isinstance(autofocus_mode, str):
+            return jsonify({"ok": False, "error": "autofocus_mode must be a preset name."}), 400
+        if has_autofocus_range and not isinstance(autofocus_range, str):
+            return jsonify({"ok": False, "error": "autofocus_range must be a preset name."}), 400
+        if has_lens_position and (
+            isinstance(lens_position, bool) or not isinstance(lens_position, (int, float))
+        ):
+            return jsonify({"ok": False, "error": "lens_position must be a number."}), 400
         if has_brightness and (
             isinstance(brightness, bool) or not isinstance(brightness, (int, float))
         ):
@@ -320,6 +428,40 @@ def create_app(start_detector: bool = True) -> Flask:
             isinstance(sharpness, bool) or not isinstance(sharpness, (int, float))
         ):
             return jsonify({"ok": False, "error": "sharpness must be a number."}), 400
+        if has_stormwatch_poll_interval and (
+            isinstance(stormwatch_poll_interval, bool)
+            or not isinstance(stormwatch_poll_interval, (int, float))
+        ):
+            return jsonify(
+                {"ok": False, "error": "stormwatch_poll_interval_seconds must be a number."}
+            ), 400
+        if has_stormwatch_cooldown and (
+            isinstance(stormwatch_cooldown, bool)
+            or not isinstance(stormwatch_cooldown, (int, float))
+        ):
+            return jsonify(
+                {"ok": False, "error": "stormwatch_cooldown_seconds must be a number."}
+            ), 400
+        if has_stormwatch_trigger and (
+            isinstance(stormwatch_trigger, bool)
+            or not isinstance(stormwatch_trigger, (int, float))
+        ):
+            return jsonify(
+                {"ok": False, "error": "stormwatch_score_trigger must be a number."}
+            ), 400
+        if has_stormwatch_hot_pixels and (
+            isinstance(stormwatch_hot_pixels, bool)
+            or not isinstance(stormwatch_hot_pixels, int)
+        ):
+            return jsonify(
+                {"ok": False, "error": "stormwatch_hot_pixel_threshold must be an integer."}
+            ), 400
+        if has_stormwatch_buffer and (
+            isinstance(stormwatch_buffer, bool) or not isinstance(stormwatch_buffer, int)
+        ):
+            return jsonify(
+                {"ok": False, "error": "stormwatch_buffer_size must be an integer."}
+            ), 400
 
         resolution_pair: tuple[int, int] | None = None
         if has_resolution:
@@ -327,33 +469,72 @@ def create_app(start_detector: bool = True) -> Flask:
             if match is None:
                 return jsonify({"ok": False, "error": "resolution must look like 1280x720."}), 400
             resolution_pair = (int(match.group(1)), int(match.group(2)))
+        status = monitor.status_payload()
+        if (
+            has_poll_interval
+            or has_burst_count
+            or has_resolution
+            or has_lighting_mode
+            or has_white_balance
+            or has_brightness
+            or has_contrast
+            or has_saturation
+            or has_sharpness
+            or has_denoise
+            or has_autofocus_mode
+            or has_autofocus_range
+            or has_lens_position
+            or has_cooldown
+            or has_threshold
+        ):
+            try:
+                status = monitor.update_capture_settings(
+                    poll_interval_seconds=float(poll_interval) if has_poll_interval else None,
+                    burst_count=burst_count if has_burst_count else None,
+                    resolution=resolution_pair,
+                    lighting_mode=lighting_mode.strip() if has_lighting_mode else None,
+                    white_balance_mode=white_balance_mode.strip() if has_white_balance else None,
+                    brightness=float(brightness) if has_brightness else None,
+                    contrast=float(contrast) if has_contrast else None,
+                    saturation=float(saturation) if has_saturation else None,
+                    sharpness=float(sharpness) if has_sharpness else None,
+                    denoise_mode=denoise_mode.strip() if has_denoise else None,
+                    autofocus_mode=autofocus_mode.strip() if has_autofocus_mode else None,
+                    autofocus_range=autofocus_range.strip() if has_autofocus_range else None,
+                    lens_position=float(lens_position) if has_lens_position else None,
+                    cooldown_seconds=float(cooldown) if has_cooldown else None,
+                    motion_threshold=float(threshold) if has_threshold else None,
+                )
+            except RuntimeError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
 
-        try:
-            return jsonify(
-                {
-                    "ok": True,
-                    "status": monitor.update_capture_settings(
-                        poll_interval_seconds=float(poll_interval)
-                        if has_poll_interval
-                        else None,
-                        burst_count=burst_count if has_burst_count else None,
-                        resolution=resolution_pair,
-                        lighting_mode=lighting_mode.strip() if has_lighting_mode else None,
-                        white_balance_mode=white_balance_mode.strip()
-                        if has_white_balance
-                        else None,
-                        brightness=float(brightness) if has_brightness else None,
-                        contrast=float(contrast) if has_contrast else None,
-                        saturation=float(saturation) if has_saturation else None,
-                        sharpness=float(sharpness) if has_sharpness else None,
-                        denoise_mode=denoise_mode.strip() if has_denoise else None,
-                        cooldown_seconds=float(cooldown) if has_cooldown else None,
-                        motion_threshold=float(threshold) if has_threshold else None,
-                    ),
-                }
-            )
-        except RuntimeError as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 400
+        if (
+            has_stormwatch_poll_interval
+            or has_stormwatch_cooldown
+            or has_stormwatch_trigger
+            or has_stormwatch_hot_pixels
+            or has_stormwatch_buffer
+        ):
+            try:
+                status = monitor.update_stormwatch_settings(
+                    poll_interval_seconds=float(stormwatch_poll_interval)
+                    if has_stormwatch_poll_interval
+                    else None,
+                    cooldown_seconds=float(stormwatch_cooldown)
+                    if has_stormwatch_cooldown
+                    else None,
+                    score_trigger=float(stormwatch_trigger)
+                    if has_stormwatch_trigger
+                    else None,
+                    hot_pixel_threshold=int(stormwatch_hot_pixels)
+                    if has_stormwatch_hot_pixels
+                    else None,
+                    buffer_size=int(stormwatch_buffer) if has_stormwatch_buffer else None,
+                )
+            except RuntimeError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
+
+        return jsonify({"ok": True, "status": status})
 
     @app.post("/api/events/delete")
     def api_events_delete():
@@ -426,6 +607,94 @@ def create_app(start_detector: bool = True) -> Flask:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
         return download_image_bundle(event_paths, "motionsense-events")
+
+    @app.get("/api/stormwatch/events")
+    def api_stormwatch_events():
+        return jsonify({"ok": True, **stormwatch_archive_browser_payload(requested_archive_day_key())})
+
+    @app.post("/api/stormwatch/events/delete")
+    def api_stormwatch_events_delete():
+        request_payload = request.get_json(silent=True) or {}
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            payload = monitor.delete_stormwatch_events(filenames)
+            return jsonify(
+                {
+                    "ok": True,
+                    **payload,
+                    **stormwatch_archive_browser_payload(
+                        day_key=requested_archive_day_key(request_payload)
+                    ),
+                }
+            )
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/stormwatch/events/move-to-gallery")
+    def api_stormwatch_events_move_to_gallery():
+        request_payload = request.get_json(silent=True) or {}
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            payload = monitor.move_stormwatch_events_to_gallery(filenames)
+            return jsonify(
+                {
+                    "ok": True,
+                    **payload,
+                    **stormwatch_archive_browser_payload(
+                        day_key=requested_archive_day_key(request_payload)
+                    ),
+                }
+            )
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/stormwatch/events/download")
+    def api_stormwatch_events_download():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            event_paths = monitor.selected_stormwatch_event_paths(filenames)
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        return download_image_bundle(event_paths, "stormwatch-events")
+
+    @app.get("/api/stormwatch/gallery")
+    def api_stormwatch_gallery():
+        return jsonify({"ok": True, "events": monitor.stormwatch_gallery_payload()})
+
+    @app.post("/api/stormwatch/gallery/delete")
+    def api_stormwatch_gallery_delete():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            payload = monitor.delete_stormwatch_gallery(filenames)
+            return jsonify({"ok": True, **payload})
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    @app.post("/api/stormwatch/gallery/download")
+    def api_stormwatch_gallery_download():
+        filenames = payload_filenames()
+        if isinstance(filenames, tuple):
+            return jsonify(filenames[0]), filenames[1]
+
+        try:
+            gallery_paths = monitor.selected_stormwatch_gallery_paths(filenames)
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        return download_image_bundle(gallery_paths, "stormwatch-gallery")
 
     @app.get("/api/events")
     def api_events():

@@ -8,6 +8,7 @@ from app.camera import CameraService, SnapshotDetails
 from app.motion import MotionDetector
 from app.sensehat import SenseHatService
 from app.timed_capture import TimedCaptureService
+from app.stormwatch import StormwatchDetector
 
 
 class MonitorService:
@@ -16,11 +17,13 @@ class MonitorService:
         camera: CameraService,
         sense_hat: SenseHatService,
         motion_detector: MotionDetector | None = None,
+        stormwatch_detector: StormwatchDetector | None = None,
         timed_capture: TimedCaptureService | None = None,
     ) -> None:
         self.camera = camera
         self.sense_hat = sense_hat
         self.motion_detector = motion_detector
+        self.stormwatch_detector = stormwatch_detector
         self.timed_capture = timed_capture
 
     def _snapshot_payload(self, snapshot: SnapshotDetails) -> dict[str, object]:
@@ -52,6 +55,7 @@ class MonitorService:
                 "rotation_degrees": self.camera.rotation_degrees(),
                 "lighting": self.camera.lighting_payload(),
                 "tuning": self.camera.tuning_payload(),
+                "focus": self.camera.focus_payload(),
                 "target": self.camera.active_capture_target(),
                 "sources": self.camera.list_sources(),
                 "resolution": self.camera.resolution_payload(),
@@ -66,6 +70,11 @@ class MonitorService:
             "motion": (
                 self.motion_detector.status_payload()
                 if self.motion_detector is not None
+                else None
+            ),
+            "stormwatch": (
+                self.stormwatch_detector.status_payload()
+                if self.stormwatch_detector is not None
                 else None
             ),
             "motion_events": (
@@ -108,6 +117,25 @@ class MonitorService:
             return []
         return self.motion_detector.gallery_payload(limit=limit)
 
+    def stormwatch_archived_events_payload(
+        self,
+        limit: int | None = None,
+        day_key: str | None = None,
+    ) -> list[dict[str, object]]:
+        if self.stormwatch_detector is None:
+            return []
+        return self.stormwatch_detector.archived_events_payload(limit=limit, day_key=day_key)
+
+    def stormwatch_archived_event_day_groups(self) -> list[dict[str, object]]:
+        if self.stormwatch_detector is None:
+            return []
+        return self.stormwatch_detector.archived_event_day_groups()
+
+    def stormwatch_gallery_payload(self, limit: int | None = None) -> list[dict[str, object]]:
+        if self.stormwatch_detector is None:
+            return []
+        return self.stormwatch_detector.gallery_payload(limit=limit)
+
     def start_motion_detection(self) -> dict[str, object]:
         if self.motion_detector is None:
             raise RuntimeError("Motion detection is not configured.")
@@ -119,6 +147,64 @@ class MonitorService:
             raise RuntimeError("Motion detection is not configured.")
         self.motion_detector.stop()
         return self.status_payload()
+
+    def start_stormwatch_detection(self) -> dict[str, object]:
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+        self.stormwatch_detector.start()
+        return self.status_payload()
+
+    def stop_stormwatch_detection(self) -> dict[str, object]:
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+        self.stormwatch_detector.stop()
+        return self.status_payload()
+
+    def delete_stormwatch_events(self, filenames: list[str]) -> dict[str, object]:
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+
+        deleted_filenames = self.stormwatch_detector.delete_events(filenames)
+        return {
+            "deleted_count": len(deleted_filenames),
+            "deleted_filenames": deleted_filenames,
+            "events": self.stormwatch_archived_events_payload(),
+            "status": self.status_payload(),
+        }
+
+    def move_stormwatch_events_to_gallery(self, filenames: list[str]) -> dict[str, object]:
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+
+        moved_filenames = self.stormwatch_detector.move_events_to_gallery(filenames)
+        return {
+            "moved_count": len(moved_filenames),
+            "moved_filenames": moved_filenames,
+            "events": self.stormwatch_archived_events_payload(),
+            "gallery": self.stormwatch_gallery_payload(),
+            "status": self.status_payload(),
+        }
+
+    def selected_stormwatch_event_paths(self, filenames: list[str]) -> list[Path]:
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+        return self.stormwatch_detector.selected_event_paths(filenames)
+
+    def delete_stormwatch_gallery(self, filenames: list[str]) -> dict[str, object]:
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+
+        deleted_filenames = self.stormwatch_detector.delete_gallery(filenames)
+        return {
+            "deleted_count": len(deleted_filenames),
+            "deleted_filenames": deleted_filenames,
+            "gallery": self.stormwatch_gallery_payload(),
+        }
+
+    def selected_stormwatch_gallery_paths(self, filenames: list[str]) -> list[Path]:
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+        return self.stormwatch_detector.selected_gallery_paths(filenames)
 
     def set_camera_source(self, source_id: str) -> dict[str, object]:
         self.camera.set_active_source(source_id)
@@ -153,6 +239,9 @@ class MonitorService:
         saturation: float | None = None,
         sharpness: float | None = None,
         denoise_mode: str | None = None,
+        autofocus_mode: str | None = None,
+        autofocus_range: str | None = None,
+        lens_position: float | None = None,
         cooldown_seconds: float | None = None,
         motion_threshold: float | None = None,
     ) -> dict[str, object]:
@@ -167,6 +256,9 @@ class MonitorService:
             and saturation is None
             and sharpness is None
             and denoise_mode is None
+            and autofocus_mode is None
+            and autofocus_range is None
+            and lens_position is None
             and cooldown_seconds is None
             and motion_threshold is None
         ):
@@ -206,6 +298,45 @@ class MonitorService:
             self.camera.set_sharpness(sharpness)
         if denoise_mode is not None:
             self.camera.set_denoise_mode(denoise_mode)
+        if autofocus_mode is not None:
+            self.camera.set_autofocus_mode(autofocus_mode)
+        if autofocus_range is not None:
+            self.camera.set_autofocus_range(autofocus_range)
+        if lens_position is not None:
+            self.camera.set_lens_position(lens_position)
+
+        return self.status_payload()
+
+    def update_stormwatch_settings(
+        self,
+        poll_interval_seconds: float | None = None,
+        cooldown_seconds: float | None = None,
+        score_trigger: float | None = None,
+        hot_pixel_threshold: int | None = None,
+        buffer_size: int | None = None,
+    ) -> dict[str, object]:
+        if (
+            poll_interval_seconds is None
+            and cooldown_seconds is None
+            and score_trigger is None
+            and hot_pixel_threshold is None
+            and buffer_size is None
+        ):
+            raise RuntimeError("At least one stormwatch setting is required.")
+
+        if self.stormwatch_detector is None:
+            raise RuntimeError("Stormwatch is not configured.")
+
+        if poll_interval_seconds is not None:
+            self.stormwatch_detector.set_poll_interval_seconds(poll_interval_seconds)
+        if cooldown_seconds is not None:
+            self.stormwatch_detector.set_cooldown_seconds(cooldown_seconds)
+        if score_trigger is not None:
+            self.stormwatch_detector.set_score_trigger(score_trigger)
+        if hot_pixel_threshold is not None:
+            self.stormwatch_detector.set_hot_pixel_threshold(hot_pixel_threshold)
+        if buffer_size is not None:
+            self.stormwatch_detector.set_buffer_size(buffer_size)
 
         return self.status_payload()
 

@@ -447,6 +447,111 @@ class CameraServiceTests(unittest.TestCase):
             self.assertEqual(payload["mode"], "auto")
             self.assertGreaterEqual(len(payload["options"]), 4)
 
+    def test_focus_payload_reports_imx708_support(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            pi_source = CameraSource(
+                source_id="pi-camera-0",
+                label="Pi Camera 1 (Camera Module 3)",
+                kind="pi",
+                available=True,
+                backend="libcamera",
+                command="/usr/bin/rpicam-still",
+                camera_index=0,
+                sensor_name="imx708",
+                model_name="Camera Module 3",
+            )
+
+            with patch.object(service, "active_source", return_value=pi_source):
+                payload = service.focus_payload()
+
+            self.assertTrue(payload["supported"])
+            self.assertEqual(payload["mode"], "on-capture")
+            self.assertEqual(payload["range"], "normal")
+            self.assertEqual(payload["lens_position"], 1.0)
+
+    def test_focus_settings_persist_in_camera_config(self):
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "latest.jpg"
+            service = CameraService(snapshot_path=snapshot_path)
+
+            service.set_autofocus_mode("manual")
+            service.set_autofocus_range("macro")
+            service.set_lens_position(2.5)
+
+            reloaded = CameraService(snapshot_path=snapshot_path)
+            payload = reloaded.focus_payload()
+            self.assertEqual(payload["mode"], "manual")
+            self.assertEqual(payload["range"], "macro")
+            self.assertEqual(payload["lens_position"], 2.5)
+
+    def test_pi_capture_command_uses_autofocus_settings_for_imx708(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service.rpicam_executable = "/usr/bin/rpicam-still"
+            service.set_autofocus_mode("continuous")
+            service.set_autofocus_range("macro")
+            pi_source = CameraSource(
+                source_id="pi-camera-0",
+                label="Pi Camera 1 (Camera Module 3)",
+                kind="pi",
+                available=True,
+                backend="libcamera",
+                command="/usr/bin/rpicam-still",
+                camera_index=0,
+                sensor_name="imx708",
+                model_name="Camera Module 3",
+            )
+
+            with patch("app.camera.subprocess.run") as run:
+                service._capture_pi_image(
+                    Path(temp_dir) / "frame.jpg",
+                    width=640,
+                    height=480,
+                    quality=90,
+                    camera_index=0,
+                    source=pi_source,
+                )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--autofocus-mode") + 1], "continuous")
+            self.assertEqual(command[command.index("--autofocus-range") + 1], "macro")
+            self.assertNotIn("--autofocus-on-capture", command)
+
+    def test_pi_capture_command_uses_manual_lens_position_for_imx708(self):
+        with TemporaryDirectory() as temp_dir:
+            service = CameraService(snapshot_path=Path(temp_dir) / "latest.jpg")
+            service.rpicam_executable = "/usr/bin/rpicam-still"
+            service.set_autofocus_mode("manual")
+            service.set_lens_position(3.2)
+            pi_source = CameraSource(
+                source_id="pi-camera-0",
+                label="Pi Camera 1 (Camera Module 3)",
+                kind="pi",
+                available=True,
+                backend="libcamera",
+                command="/usr/bin/rpicam-still",
+                camera_index=0,
+                sensor_name="imx708",
+                model_name="Camera Module 3",
+            )
+
+            with patch("app.camera.subprocess.run") as run:
+                service._capture_pi_image(
+                    Path(temp_dir) / "frame.jpg",
+                    width=640,
+                    height=480,
+                    quality=90,
+                    camera_index=0,
+                    source=pi_source,
+                )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--autofocus-mode") + 1], "manual")
+            self.assertEqual(command[command.index("--lens-position") + 1], "3.2")
+            self.assertNotIn("--autofocus-range", command)
+            self.assertNotIn("--autofocus-on-capture", command)
+
 
 if __name__ == "__main__":
     unittest.main()

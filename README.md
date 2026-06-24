@@ -64,6 +64,12 @@ Pi CSI Cameras / USB Webcam / ESP32-CAM
 - `app/web.py`  
   Flask routes for the dashboard and JSON endpoints
 
+## IMX708 / Camera Module 3 notes
+
+- Camera Module 3 uses an autofocus lens, so blurry images are often a focus-control issue rather than a bad sensor.
+- MotionSense Pi enables **Auto on Capture** by default for supported autofocus cameras and exposes focus controls in the dashboard.
+- If every shot still looks hazy at all distances, check the lens for the thin factory protective film and remove it if present.
+
 ### Browser UI
 
 The browser dashboard supports:
@@ -80,6 +86,11 @@ The browser dashboard supports:
   - fluorescent
   - indoor
   - low light
+- autofocus controls for supported Pi cameras such as the IMX708 / Camera Module 3:
+  - auto on capture
+  - continuous autofocus
+  - manual focus with lens position control
+  - normal / macro / full scan range
 - one-click 90 degree camera rotation with persisted orientation for live and saved images
 - camera source selection for each detected Pi CSI camera, supported USB webcams, and optional ESP32-CAM
 - ESP32-CAM URL storage

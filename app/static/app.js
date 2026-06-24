@@ -10,6 +10,9 @@ const captureResolution = document.getElementById("capture-resolution");
 const captureLighting = document.getElementById("capture-lighting");
 const captureWhiteBalance = document.getElementById("capture-white-balance");
 const captureDenoise = document.getElementById("capture-denoise");
+const captureAutofocusMode = document.getElementById("capture-autofocus-mode");
+const captureAutofocusRange = document.getElementById("capture-autofocus-range");
+const captureLensPosition = document.getElementById("capture-lens-position");
 const captureBrightness = document.getElementById("capture-brightness");
 const captureContrast = document.getElementById("capture-contrast");
 const captureSaturation = document.getElementById("capture-saturation");
@@ -29,6 +32,14 @@ const timerStopButton = document.getElementById("timer-stop-button");
 const rotateButton = document.getElementById("rotate-button");
 const motionStartButton = document.getElementById("motion-start-button");
 const motionStopButton = document.getElementById("motion-stop-button");
+const stormwatchStartButton = document.getElementById("stormwatch-start-button");
+const stormwatchStopButton = document.getElementById("stormwatch-stop-button");
+const stormwatchPollInterval = document.getElementById("stormwatch-poll-interval");
+const stormwatchCooldown = document.getElementById("stormwatch-cooldown");
+const stormwatchScoreTrigger = document.getElementById("stormwatch-score-trigger");
+const stormwatchHotPixelThreshold = document.getElementById("stormwatch-hot-pixel-threshold");
+const stormwatchBufferSize = document.getElementById("stormwatch-buffer-size");
+const stormwatchSettingsButton = document.getElementById("stormwatch-settings-button");
 const message = document.getElementById("message");
 const snapshotImage = document.getElementById("snapshot-image");
 const snapshotEmpty = document.getElementById("snapshot-empty");
@@ -37,10 +48,13 @@ const focusPreviewButton = document.getElementById("focus-preview-button");
 const focusPreviewNote = document.getElementById("focus-preview-note");
 const cameraLightingNote = document.getElementById("camera-lighting-note");
 const cameraTuningNote = document.getElementById("camera-tuning-note");
+const cameraFocusNote = document.getElementById("camera-focus-note");
 const timerModeNote = document.getElementById("timer-mode-note");
 const senseHatPanel = document.getElementById("sensehat-panel");
 const timerPanel = document.getElementById("timer-panel");
 const motionPanel = document.getElementById("motion-panel");
+const stormwatchPanel = document.getElementById("stormwatch-panel");
+const stormwatchNote = document.getElementById("stormwatch-note");
 const eventList = document.getElementById("event-list");
 const eventsSelectButton = document.getElementById("events-select-button");
 const eventsDownloadButton = document.getElementById("events-download-button");
@@ -207,6 +221,15 @@ async function pauseBackgroundCaptureForFocusPreview() {
     renderStatus(payload.status);
   }
 
+  if (latestStatus?.stormwatch?.armed) {
+    const response = await fetch("/api/stormwatch/stop", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Focus preview could not pause stormwatch.");
+    }
+    renderStatus(payload.status);
+  }
+
   if (latestStatus?.timer?.armed) {
     const response = await fetch("/api/timer/stop", { method: "POST" });
     const payload = await response.json();
@@ -317,6 +340,19 @@ function renderCamera(data) {
     denoise_options: [],
     ranges: {},
   };
+  const focus = data.focus || {
+    supported: false,
+    mode: "on-capture",
+    range: "normal",
+    lens_position: 1.0,
+    mode_options: [],
+    range_options: [],
+    ranges: {},
+  };
+  const selectedFocusMode =
+    (focus.mode_options || []).find((option) => option.value === focus.mode)?.label ||
+    focus.mode ||
+    "Unsupported";
   document.getElementById("camera-available").textContent = data.available ? "Yes" : "No";
   document.getElementById("camera-source-name").textContent = data.active_source_name || "Unavailable";
   document.getElementById("camera-backend").textContent = data.backend || "Unavailable";
@@ -330,6 +366,9 @@ function renderCamera(data) {
   document.getElementById("camera-burst-count").textContent = `${data.burst_count || 1}`;
   document.getElementById("camera-rotation").textContent = `${data.rotation_degrees || 0} deg`;
   document.getElementById("camera-lighting").textContent = lighting.mode || "auto";
+  document.getElementById("camera-focus").textContent = focus.supported
+    ? selectedFocusMode
+    : "Unsupported";
 
   cameraSourceSelect.innerHTML = "";
   for (const source of data.sources || []) {
@@ -350,6 +389,8 @@ function renderCamera(data) {
   captureLighting.innerHTML = "";
   captureWhiteBalance.innerHTML = "";
   captureDenoise.innerHTML = "";
+  captureAutofocusMode.innerHTML = "";
+  captureAutofocusRange.innerHTML = "";
   for (const option of data.resolution.options || []) {
     const selectOption = document.createElement("option");
     selectOption.value = `${option.width}x${option.height}`;
@@ -379,6 +420,21 @@ function renderCamera(data) {
     selectOption.selected = option.value === tuning.denoise_mode;
     captureDenoise.append(selectOption);
   }
+  for (const option of focus.mode_options || []) {
+    const selectOption = document.createElement("option");
+    selectOption.value = option.value;
+    selectOption.textContent = option.label;
+    selectOption.selected = option.value === focus.mode;
+    captureAutofocusMode.append(selectOption);
+  }
+  for (const option of focus.range_options || []) {
+    const selectOption = document.createElement("option");
+    selectOption.value = option.value;
+    selectOption.textContent = option.label;
+    selectOption.selected = option.value === focus.range;
+    captureAutofocusRange.append(selectOption);
+  }
+  captureLensPosition.value = `${focus.lens_position}`;
   captureBrightness.value = `${tuning.brightness}`;
   captureContrast.value = `${tuning.contrast}`;
   captureSaturation.value = `${tuning.saturation}`;
@@ -406,12 +462,26 @@ function renderCamera(data) {
   ]) {
     control.disabled = !tuning.supported;
   }
+  captureAutofocusMode.disabled = !focus.supported;
+  captureAutofocusRange.disabled = !focus.supported || focus.mode === "manual";
+  captureLensPosition.disabled = !focus.supported || focus.mode !== "manual";
+  const lensPositionRange = focus.ranges?.lens_position;
+  if (lensPositionRange) {
+    captureLensPosition.min = `${lensPositionRange.min}`;
+    captureLensPosition.max = `${lensPositionRange.max}`;
+    captureLensPosition.step = `${lensPositionRange.step}`;
+  }
   cameraLightingNote.textContent = lighting.supported
     ? "Lighting presets are active for the Pi Camera."
     : "Lighting presets are saved, but only apply when the Pi Camera is active.";
   cameraTuningNote.textContent = tuning.supported
     ? "Direct Pi Camera tuning is active. Lower brightness or switch white balance when bright sunlight shifts the color."
     : "Direct Pi Camera tuning is saved, but only applies when the Pi Camera is active.";
+  cameraFocusNote.textContent = focus.supported
+    ? focus.mode === "manual"
+      ? "Manual focus is active. Use focus preview and raise lens position to focus closer subjects."
+      : "Autofocus is active for this Pi camera. Auto on Capture is the best default for still snapshots."
+    : "Focus controls are saved, but only apply to autofocus-capable Pi cameras like the IMX708 Camera Module 3.";
 }
 
 function renderMotion(data) {
@@ -445,6 +515,51 @@ function renderMotion(data) {
 
   motionStartButton.disabled = data.armed;
   motionStopButton.disabled = !data.armed;
+}
+
+function renderStormwatch(data) {
+  stormwatchPanel.innerHTML = "";
+
+  if (!data) {
+    addDefinitionRow(stormwatchPanel, "Available", "No");
+    stormwatchStartButton.disabled = true;
+    stormwatchStopButton.disabled = true;
+    stormwatchPollInterval.disabled = true;
+    stormwatchCooldown.disabled = true;
+    stormwatchScoreTrigger.disabled = true;
+    stormwatchHotPixelThreshold.disabled = true;
+    stormwatchBufferSize.disabled = true;
+    stormwatchSettingsButton.disabled = true;
+    return;
+  }
+
+  addDefinitionRow(stormwatchPanel, "Armed", data.armed ? "Yes" : "No");
+  addDefinitionRow(stormwatchPanel, "Running", data.running ? "Yes" : "No");
+  addDefinitionRow(stormwatchPanel, "Poll Interval", `${data.poll_interval_seconds}s`);
+  addDefinitionRow(stormwatchPanel, "Cooldown", `${data.cooldown_seconds}s`);
+  addDefinitionRow(stormwatchPanel, "Score Trigger", `${data.score_trigger ?? data.motion_threshold}`);
+  addDefinitionRow(stormwatchPanel, "Hot Pixel Threshold", `${data.hot_pixel_threshold}`);
+  addDefinitionRow(stormwatchPanel, "Buffer Size", `${data.buffer_size}`);
+  addDefinitionRow(stormwatchPanel, "Last Score", data.last_score === null ? "Waiting for frames" : `${data.last_score}`);
+  addDefinitionRow(stormwatchPanel, "Last Trigger", data.last_lightning_at || data.last_motion_at || "No trigger yet");
+  addDefinitionRow(stormwatchPanel, "Detector Error", data.last_error || "None");
+
+  stormwatchStartButton.disabled = data.armed;
+  stormwatchStopButton.disabled = !data.armed;
+  stormwatchPollInterval.value = `${data.poll_interval_seconds}`;
+  stormwatchCooldown.value = `${data.cooldown_seconds}`;
+  stormwatchScoreTrigger.value = `${data.score_trigger ?? data.motion_threshold}`;
+  stormwatchHotPixelThreshold.value = `${data.hot_pixel_threshold}`;
+  stormwatchBufferSize.value = `${data.buffer_size}`;
+  stormwatchPollInterval.disabled = false;
+  stormwatchCooldown.disabled = false;
+  stormwatchScoreTrigger.disabled = false;
+  stormwatchHotPixelThreshold.disabled = false;
+  stormwatchBufferSize.disabled = false;
+  stormwatchSettingsButton.disabled = false;
+  stormwatchNote.textContent = data.armed
+    ? "Stormwatch is armed and will capture bursts when lightning-like spikes are detected."
+    : "Stormwatch watches for sudden frame spikes and saves a burst of captures when lightning-like changes are detected.";
 }
 
 function timerInputsFromSeconds(intervalSeconds) {
@@ -653,6 +768,7 @@ function renderStatus(status) {
   renderSenseHat(status.sense_hat);
   renderTimer(status.timer);
   renderMotion(status.motion);
+  renderStormwatch(status.stormwatch);
   motionPollInterval.disabled = !status.motion;
   motionCooldown.disabled = !status.motion;
   motionThreshold.disabled = !status.motion;
@@ -660,6 +776,18 @@ function renderStatus(status) {
     motionPollInterval.value = `${status.motion.poll_interval_seconds}`;
     motionCooldown.value = `${status.motion.cooldown_seconds}`;
     motionThreshold.value = `${status.motion.motion_threshold}`;
+  }
+  stormwatchPollInterval.disabled = !status.stormwatch;
+  stormwatchCooldown.disabled = !status.stormwatch;
+  stormwatchScoreTrigger.disabled = !status.stormwatch;
+  stormwatchHotPixelThreshold.disabled = !status.stormwatch;
+  stormwatchBufferSize.disabled = !status.stormwatch;
+  if (status.stormwatch) {
+    stormwatchPollInterval.value = `${status.stormwatch.poll_interval_seconds}`;
+    stormwatchCooldown.value = `${status.stormwatch.cooldown_seconds}`;
+    stormwatchScoreTrigger.value = `${status.stormwatch.score_trigger ?? status.stormwatch.motion_threshold}`;
+    stormwatchHotPixelThreshold.value = `${status.stormwatch.hot_pixel_threshold}`;
+    stormwatchBufferSize.value = `${status.stormwatch.buffer_size}`;
   }
   if (!focusPreviewActive) {
     renderSnapshot(status.snapshot);
@@ -698,6 +826,21 @@ async function setMotionState(endpoint, successMessage) {
 
   if (!response.ok) {
     message.textContent = payload.error || "Motion detector update failed.";
+    return;
+  }
+
+  renderStatus(payload.status);
+  message.textContent = successMessage;
+}
+
+async function setStormwatchState(endpoint, successMessage) {
+  stopFocusPreview({ restoreSnapshot: false });
+  message.textContent = "Updating stormwatch...";
+  const response = await fetch(endpoint, { method: "POST" });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    message.textContent = payload.error || "Stormwatch update failed.";
     return;
   }
 
@@ -779,6 +922,7 @@ async function saveSettings() {
   const contrast = Number.parseFloat(captureContrast.value);
   const saturation = Number.parseFloat(captureSaturation.value);
   const sharpness = Number.parseFloat(captureSharpness.value);
+  const lensPosition = Number.parseFloat(captureLensPosition.value);
   if (Number.isNaN(brightness)) {
     message.textContent = "Enter a brightness value in the allowed range.";
     return;
@@ -795,11 +939,18 @@ async function saveSettings() {
     message.textContent = "Enter a sharpness value in the allowed range.";
     return;
   }
+  if (Number.isNaN(lensPosition)) {
+    message.textContent = "Enter a manual lens position in the allowed range.";
+    return;
+  }
 
   const body = {
     burst_count: burstCount,
     resolution: captureResolution.value,
     lighting_mode: captureLighting.value,
+    autofocus_mode: captureAutofocusMode.value,
+    autofocus_range: captureAutofocusRange.value,
+    lens_position: lensPosition,
     white_balance_mode: captureWhiteBalance.value,
     brightness,
     contrast,
@@ -848,6 +999,61 @@ async function saveSettings() {
 
   renderStatus(payload.status);
   message.textContent = "Settings saved.";
+}
+
+async function saveStormwatchSettings() {
+  stopFocusPreview({ restoreSnapshot: false });
+  const pollInterval = Number.parseFloat(stormwatchPollInterval.value);
+  if (Number.isNaN(pollInterval)) {
+    message.textContent = "Enter a stormwatch poll interval between 0.5 and 30 seconds.";
+    return;
+  }
+  const cooldown = Number.parseFloat(stormwatchCooldown.value);
+  if (Number.isNaN(cooldown)) {
+    message.textContent = "Enter a stormwatch cooldown between 1 and 300 seconds.";
+    return;
+  }
+  const scoreTrigger = Number.parseFloat(stormwatchScoreTrigger.value);
+  if (Number.isNaN(scoreTrigger)) {
+    message.textContent = "Enter a stormwatch score trigger between 1 and 255.";
+    return;
+  }
+  const hotPixelThreshold = Number.parseInt(stormwatchHotPixelThreshold.value, 10);
+  if (Number.isNaN(hotPixelThreshold)) {
+    message.textContent = "Enter a stormwatch hot pixel threshold between 1 and 255.";
+    return;
+  }
+  const bufferSize = Number.parseInt(stormwatchBufferSize.value, 10);
+  if (Number.isNaN(bufferSize)) {
+    message.textContent = "Enter a stormwatch buffer size between 1 and 120.";
+    return;
+  }
+
+  message.textContent = "Saving stormwatch settings...";
+  stormwatchSettingsButton.disabled = true;
+  const response = await fetch("/api/settings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      stormwatch_poll_interval_seconds: pollInterval,
+      stormwatch_cooldown_seconds: cooldown,
+      stormwatch_score_trigger: scoreTrigger,
+      stormwatch_hot_pixel_threshold: hotPixelThreshold,
+      stormwatch_buffer_size: bufferSize,
+    }),
+  });
+  const payload = await response.json();
+  stormwatchSettingsButton.disabled = false;
+
+  if (!response.ok) {
+    message.textContent = payload.error || "Stormwatch settings update failed.";
+    return;
+  }
+
+  renderStatus(payload.status);
+  message.textContent = "Stormwatch settings saved.";
 }
 
 async function startTimer() {
@@ -1025,6 +1231,10 @@ settingsButton.addEventListener("click", () => {
   void saveSettings();
 });
 
+stormwatchSettingsButton.addEventListener("click", () => {
+  void saveStormwatchSettings();
+});
+
 eventsSelectButton.addEventListener("click", () => {
   if (selectedEventFilenames.size === currentEvents.length) {
     selectedEventFilenames.clear();
@@ -1053,6 +1263,14 @@ motionStartButton.addEventListener("click", () => {
 
 motionStopButton.addEventListener("click", () => {
   void setMotionState("/api/motion/stop", "Motion detector paused.");
+});
+
+stormwatchStartButton.addEventListener("click", () => {
+  void setStormwatchState("/api/stormwatch/start", "Stormwatch armed.");
+});
+
+stormwatchStopButton.addEventListener("click", () => {
+  void setStormwatchState("/api/stormwatch/stop", "Stormwatch paused.");
 });
 
 renderStatus(initialStatus);

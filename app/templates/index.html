@@ -74,11 +74,21 @@
               <dt>Rotation</dt>
               <dd id="camera-rotation">{{ status.camera.rotation_degrees }}&deg;</dd>
             </div>
-            <div>
-              <dt>Lighting</dt>
-              <dd id="camera-lighting">{{ status.camera.lighting.mode }}</dd>
-            </div>
-          </dl>
+              <div>
+                <dt>Lighting</dt>
+                <dd id="camera-lighting">{{ status.camera.lighting.mode }}</dd>
+              </div>
+              <div>
+                <dt>Focus</dt>
+                <dd id="camera-focus">
+                  {% if status.camera.focus.supported %}
+                    {{ status.camera.focus.mode }}
+                  {% else %}
+                    Unsupported
+                  {% endif %}
+                </dd>
+              </div>
+            </dl>
           <div class="camera-config">
             <label for="network-camera-url">ESP32-CAM URL</label>
             <div class="actions compact">
@@ -243,6 +253,46 @@
               Direct Pi Camera tuning helps balance bright windows and changing room light.
             </p>
           </div>
+          <div class="camera-config">
+            <label for="capture-autofocus-mode">Pi Camera Focus</label>
+            <div class="actions compact settings-actions tuning-actions">
+              <label class="setting-field" for="capture-autofocus-mode">
+                <span class="setting-field-label">Focus Mode</span>
+                <select id="capture-autofocus-mode">
+                  {% for option in status.camera.focus.mode_options %}
+                    <option value="{{ option.value }}" {% if option.value == status.camera.focus.mode %}selected{% endif %}>
+                      {{ option.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="setting-field" for="capture-autofocus-range">
+                <span class="setting-field-label">Focus Range</span>
+                <select id="capture-autofocus-range">
+                  {% for option in status.camera.focus.range_options %}
+                    <option value="{{ option.value }}" {% if option.value == status.camera.focus.range %}selected{% endif %}>
+                      {{ option.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label class="setting-field" for="capture-lens-position">
+                <span class="setting-field-label">Manual Lens Position</span>
+                <input
+                  id="capture-lens-position"
+                  type="number"
+                  min="{{ status.camera.focus.ranges.lens_position.min }}"
+                  max="{{ status.camera.focus.ranges.lens_position.max }}"
+                  step="{{ status.camera.focus.ranges.lens_position.step }}"
+                  value="{{ status.camera.focus.lens_position }}"
+                  title="0 focuses at infinity; higher values focus closer"
+                >
+              </label>
+            </div>
+            <p id="camera-focus-note" class="subtle">
+              Autofocus controls are available on supported Pi cameras like the IMX708 Camera Module 3.
+            </p>
+          </div>
         </article>
 
         <article class="card">
@@ -317,6 +367,90 @@
             </div>
           </div>
           <dl id="motion-panel"></dl>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <h2>Stormwatch</h2>
+            <div class="actions compact">
+              <button id="stormwatch-start-button">Arm</button>
+              <button id="stormwatch-stop-button">Pause</button>
+            </div>
+          </div>
+          <div class="camera-config">
+            <label for="stormwatch-poll-interval">Stormwatch Settings</label>
+            <div class="actions compact settings-actions tuning-actions">
+              <label class="setting-field" for="stormwatch-poll-interval">
+                <span class="setting-field-label">Poll Interval</span>
+                <input
+                  id="stormwatch-poll-interval"
+                  type="number"
+                  min="0.5"
+                  max="30"
+                  step="0.5"
+                  value="1"
+                  title="How often the stormwatch detector checks for spikes in seconds"
+                >
+              </label>
+              <label class="setting-field" for="stormwatch-cooldown">
+                <span class="setting-field-label">Cooldown</span>
+                <input
+                  id="stormwatch-cooldown"
+                  type="number"
+                  min="1"
+                  max="300"
+                  step="1"
+                  value="10"
+                  title="Cooldown after a stormwatch trigger in seconds"
+                >
+              </label>
+              <label class="setting-field" for="stormwatch-score-trigger">
+                <span class="setting-field-label">Score Trigger</span>
+                <input
+                  id="stormwatch-score-trigger"
+                  type="number"
+                  min="1"
+                  max="255"
+                  step="0.5"
+                  value="12"
+                  title="Lightning spike score required to trigger capture"
+                >
+              </label>
+              <label class="setting-field" for="stormwatch-hot-pixel-threshold">
+                <span class="setting-field-label">Hot Pixel Threshold</span>
+                <input
+                  id="stormwatch-hot-pixel-threshold"
+                  type="number"
+                  min="1"
+                  max="255"
+                  step="1"
+                  value="60"
+                  title="Pixel difference threshold used for the stormwatch score"
+                >
+              </label>
+              <label class="setting-field" for="stormwatch-buffer-size">
+                <span class="setting-field-label">Buffer Size</span>
+                <input
+                  id="stormwatch-buffer-size"
+                  type="number"
+                  min="1"
+                  max="120"
+                  step="1"
+                  value="15"
+                  title="Number of probe frames to warm up before detection"
+                >
+              </label>
+              <button id="stormwatch-settings-button">Save Stormwatch Settings</button>
+            </div>
+            <p id="stormwatch-note" class="subtle">
+              Stormwatch watches for sudden frame spikes and saves a burst of captures when lightning-like changes are detected.
+            </p>
+          </div>
+          <div class="actions compact">
+            <a class="button-link secondary" href="/stormwatch">Stormwatch Archive</a>
+            <a class="button-link secondary" href="/stormwatch/gallery">Stormwatch Gallery</a>
+          </div>
+          <dl id="stormwatch-panel"></dl>
         </article>
 
         <article class="card">

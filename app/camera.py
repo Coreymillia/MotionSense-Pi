@@ -156,6 +156,19 @@ class CameraService:
         CameraTuningOption(value="cdn_fast", label="Fast"),
         CameraTuningOption(value="cdn_hq", label="High Quality"),
     )
+    AUTOFOCUS_MODE_OPTIONS: tuple[CameraTuningOption, ...] = (
+        CameraTuningOption(value="on-capture", label="Auto on Capture"),
+        CameraTuningOption(value="continuous", label="Continuous"),
+        CameraTuningOption(value="manual", label="Manual"),
+    )
+    AUTOFOCUS_RANGE_OPTIONS: tuple[CameraTuningOption, ...] = (
+        CameraTuningOption(value="normal", label="Normal"),
+        CameraTuningOption(value="macro", label="Macro"),
+        CameraTuningOption(value="full", label="Full Range"),
+    )
+    AUTOFOCUS_SUPPORTED_SENSORS = frozenset({"imx708"})
+    AUTOFOCUS_SUPPORTED_MODEL_TOKENS = ("camera module 3",)
+    LENS_POSITION_RANGE = {"min": 0.0, "max": 10.0, "step": 0.1}
     BRIGHTNESS_RANGE = {"min": -1.0, "max": 1.0, "step": 0.05}
     CONTRAST_RANGE = {"min": 0.0, "max": 4.0, "step": 0.05}
     SATURATION_RANGE = {"min": 0.0, "max": 4.0, "step": 0.05}
@@ -189,6 +202,9 @@ class CameraService:
         self._saturation = 1.0
         self._sharpness = 1.0
         self._denoise_mode = default_profile.denoise
+        self._autofocus_mode = "on-capture"
+        self._autofocus_range = "normal"
+        self._lens_position = 1.0
         self._resolution_options: tuple[ResolutionOption, ...] | None = None
         self._resolution_options_cache_key: tuple[str | None, int, int] | None = None
         self._pi_camera_infos: tuple[PiCameraInfo, ...] = ()
@@ -272,6 +288,24 @@ class CameraService:
             )
         except RuntimeError:
             pass
+        try:
+            self._autofocus_mode = self._normalize_autofocus_mode(
+                config.get("autofocus_mode", self._autofocus_mode)
+            )
+        except RuntimeError:
+            pass
+        try:
+            self._autofocus_range = self._normalize_autofocus_range(
+                config.get("autofocus_range", self._autofocus_range)
+            )
+        except RuntimeError:
+            pass
+        try:
+            self._lens_position = self._normalize_lens_position(
+                config.get("lens_position", self._lens_position)
+            )
+        except RuntimeError:
+            pass
 
         try:
             self.width, self.height = self._normalize_resolution(
@@ -297,6 +331,9 @@ class CameraService:
             "saturation": self._saturation,
             "sharpness": self._sharpness,
             "denoise_mode": self._denoise_mode,
+            "autofocus_mode": self._autofocus_mode,
+            "autofocus_range": self._autofocus_range,
+            "lens_position": self._lens_position,
             "width": self.width,
             "height": self.height,
         }
@@ -399,6 +436,34 @@ class CameraService:
         return normalized
 
     @staticmethod
+    def _autofocus_mode_options_by_value() -> dict[str, CameraTuningOption]:
+        return {option.value: option for option in CameraService.AUTOFOCUS_MODE_OPTIONS}
+
+    @classmethod
+    def _normalize_autofocus_mode(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise RuntimeError("Autofocus mode must be one of the supported options.")
+        normalized = value.strip().lower()
+        if normalized == "fixed":
+            normalized = "manual"
+        if normalized not in cls._autofocus_mode_options_by_value():
+            raise RuntimeError("Autofocus mode must be one of the supported options.")
+        return normalized
+
+    @staticmethod
+    def _autofocus_range_options_by_value() -> dict[str, CameraTuningOption]:
+        return {option.value: option for option in CameraService.AUTOFOCUS_RANGE_OPTIONS}
+
+    @classmethod
+    def _normalize_autofocus_range(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise RuntimeError("Autofocus range must be one of the supported options.")
+        normalized = value.strip().lower()
+        if normalized not in cls._autofocus_range_options_by_value():
+            raise RuntimeError("Autofocus range must be one of the supported options.")
+        return normalized
+
+    @staticmethod
     def _normalize_numeric_setting(
         value: object,
         *,
@@ -412,6 +477,15 @@ class CameraService:
         if normalized < minimum or normalized > maximum:
             raise RuntimeError(f"{label} must be between {minimum} and {maximum}.")
         return normalized
+
+    @classmethod
+    def _normalize_lens_position(cls, value: object) -> float:
+        return cls._normalize_numeric_setting(
+            value,
+            minimum=cls.LENS_POSITION_RANGE["min"],
+            maximum=cls.LENS_POSITION_RANGE["max"],
+            label="Lens position",
+        )
 
     @classmethod
     def _normalize_brightness(cls, value: object) -> float:
@@ -487,6 +561,37 @@ class CameraService:
         self._denoise_mode = self._normalize_denoise_mode(value)
         self._save_config()
 
+    @classmethod
+    def _source_supports_autofocus(cls, source: CameraSource | None) -> bool:
+        if source is None or source.kind != "pi":
+            return False
+        sensor_name = (source.sensor_name or "").strip().lower()
+        model_name = (source.model_name or "").strip().lower()
+        return sensor_name in cls.AUTOFOCUS_SUPPORTED_SENSORS or any(
+            token in model_name for token in cls.AUTOFOCUS_SUPPORTED_MODEL_TOKENS
+        )
+
+    def autofocus_mode(self) -> str:
+        return self._autofocus_mode
+
+    def autofocus_range(self) -> str:
+        return self._autofocus_range
+
+    def set_autofocus_mode(self, value: str) -> None:
+        self._autofocus_mode = self._normalize_autofocus_mode(value)
+        self._save_config()
+
+    def set_autofocus_range(self, value: str) -> None:
+        self._autofocus_range = self._normalize_autofocus_range(value)
+        self._save_config()
+
+    def lens_position(self) -> float:
+        return self._lens_position
+
+    def set_lens_position(self, value: float) -> None:
+        self._lens_position = self._normalize_lens_position(value)
+        self._save_config()
+
     def lighting_payload(self) -> dict[str, Any]:
         active_source = self.active_source()
         return {
@@ -524,6 +629,19 @@ class CameraService:
                 "saturation": dict(self.SATURATION_RANGE),
                 "sharpness": dict(self.SHARPNESS_RANGE),
             },
+        }
+
+    def focus_payload(self) -> dict[str, Any]:
+        active_source = self.active_source()
+        supported = self._source_supports_autofocus(active_source)
+        return {
+            "supported": supported,
+            "mode": self._autofocus_mode,
+            "range": self._autofocus_range,
+            "lens_position": self._lens_position,
+            "mode_options": [asdict(option) for option in self.AUTOFOCUS_MODE_OPTIONS],
+            "range_options": [asdict(option) for option in self.AUTOFOCUS_RANGE_OPTIONS],
+            "ranges": {"lens_position": dict(self.LENS_POSITION_RANGE)},
         }
 
     @staticmethod
@@ -1089,6 +1207,7 @@ class CameraService:
         height: int,
         quality: int,
         camera_index: int | None = None,
+        source: CameraSource | None = None,
     ) -> None:
         if self.rpicam_executable is None:
             raise RuntimeError("rpicam-still is not installed on this device.")
@@ -1125,6 +1244,35 @@ class CameraService:
             "--denoise",
             self._denoise_mode,
         ]
+        if self._source_supports_autofocus(source):
+            if self._autofocus_mode == "continuous":
+                command.extend(
+                    [
+                        "--autofocus-mode",
+                        "continuous",
+                        "--autofocus-range",
+                        self._autofocus_range,
+                    ]
+                )
+            elif self._autofocus_mode == "manual":
+                command.extend(
+                    [
+                        "--autofocus-mode",
+                        "manual",
+                        "--lens-position",
+                        str(self._lens_position),
+                    ]
+                )
+            else:
+                command.extend(
+                    [
+                        "--autofocus-mode",
+                        "auto",
+                        "--autofocus-range",
+                        self._autofocus_range,
+                        "--autofocus-on-capture",
+                    ]
+                )
         if camera_index is not None:
             command.extend(["--camera", str(camera_index)])
 
@@ -1224,6 +1372,7 @@ class CameraService:
                         height,
                         quality,
                         camera_index=source.camera_index,
+                        source=source,
                     )
                 elif source.kind == "usb" and source.device is not None:
                     self._capture_usb_image(source.device, output_path, width, height)

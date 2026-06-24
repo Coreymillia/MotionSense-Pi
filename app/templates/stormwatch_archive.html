@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MotionSense Pi Stormwatch Archive</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <nav class="page-nav">
+        <a class="button-link" href="/">Back to Dashboard</a>
+        <a class="button-link secondary" href="/stormwatch/gallery">Stormwatch Gallery</a>
+      </nav>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Saved Stormwatch Captures</p>
+            <h1>Stormwatch Archive</h1>
+            <p class="subtle">Browse stormwatch captures one day at a time and move the keepers into the stormwatch gallery.</p>
+          </div>
+          <div class="actions compact">
+            <button id="browser-select-button" type="button">Select All</button>
+            <button id="browser-move-button" type="button">Move Selected to Stormwatch Gallery</button>
+            <button id="browser-download-button" type="button">Download Selected</button>
+            <button id="browser-delete-button" type="button" class="danger">Delete Selected</button>
+          </div>
+        </div>
+        <p class="subtle archive-meta">Storage path: <code>{{ event_dir }}</code></p>
+        <div class="archive-day-browser">
+          <label class="archive-day-select" for="browser-day-select">
+            <span>Archive Day</span>
+            <select id="browser-day-select"></select>
+          </label>
+          <p id="browser-day-summary" class="subtle archive-day-summary"></p>
+        </div>
+
+        <div id="browser-message" class="message" aria-live="polite"></div>
+        <div id="browser-event-list" class="event-list"></div>
+      </section>
+    </main>
+    <script id="browser-events" type="application/json">{{ browser_payload | tojson }}</script>
+    <script id="browser-config" type="application/json">{{ {
+      "listUrl": "/api/stormwatch/events",
+      "downloadUrl": "/api/stormwatch/events/download",
+      "deleteUrl": "/api/stormwatch/events/delete",
+      "moveUrl": "/api/stormwatch/events/move-to-gallery",
+      "prioritizeSelection": true,
+      "selectButtonLabel": "Select to Move",
+      "selectedButtonLabel": "Selected for Move",
+      "openButtonLabel": "Open Preview",
+      "emptyMessage": "No saved stormwatch events yet.",
+      "refreshErrorMessage": "Stormwatch archive refresh failed.",
+      "downloadErrorMessage": "Download failed.",
+      "deleteErrorMessage": "Delete failed.",
+      "deleteProgressMessage": "Deleting stormwatch photos...",
+      "dayBrowseEnabled": true,
+      "moveErrorMessage": "Move failed.",
+      "moveProgressMessage": "Moving photos to stormwatch gallery...",
+      "moveButtonLabel": "Move to Stormwatch Gallery"
+    } | tojson }}</script>
+    <script src="{{ url_for('static', filename='event-browser.js') }}"></script>
+  </body>
+</html>

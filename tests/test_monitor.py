@@ -125,6 +125,7 @@ class MonitorServiceTests(unittest.TestCase):
             self.assertEqual(payload["camera"]["burst_count"], 1)
             self.assertEqual(payload["camera"]["rotation_degrees"], 0)
             self.assertEqual(payload["camera"]["lighting"]["mode"], "auto")
+            self.assertIn("focus", payload["camera"])
             self.assertIn("options", payload["camera"]["resolution"])
             self.assertEqual(len(payload["motion_events"]), 1)
 
@@ -589,6 +590,95 @@ class MonitorServiceTests(unittest.TestCase):
         camera.set_denoise_mode.assert_called_once_with("off")
         self.assertEqual(payload["camera"]["tuning"]["white_balance_mode"], "cloudy")
         self.assertEqual(payload["camera"]["tuning"]["brightness"], -0.2)
+
+    def test_update_capture_settings_updates_camera_focus(self):
+        camera = Mock()
+        camera.set_burst_count = Mock()
+        camera.set_resolution = Mock()
+        camera.set_lighting_mode = Mock()
+        camera.set_white_balance_mode = Mock()
+        camera.set_brightness = Mock()
+        camera.set_contrast = Mock()
+        camera.set_saturation = Mock()
+        camera.set_sharpness = Mock()
+        camera.set_denoise_mode = Mock()
+        camera.set_autofocus_mode = Mock()
+        camera.set_autofocus_range = Mock()
+        camera.set_lens_position = Mock()
+        camera.burst_count = Mock(return_value=1)
+        camera.rotation_degrees = Mock(return_value=0)
+        camera.lighting_payload = Mock(
+            return_value={"mode": "auto", "supported": True, "options": []}
+        )
+        camera.tuning_payload = Mock(
+            return_value={
+                "supported": True,
+                "white_balance_mode": "auto",
+                "brightness": 0.0,
+                "contrast": 1.0,
+                "saturation": 1.0,
+                "sharpness": 1.0,
+                "denoise_mode": "auto",
+                "white_balance_options": [],
+                "denoise_options": [],
+                "ranges": {},
+            }
+        )
+        camera.focus_payload = Mock(
+            return_value={
+                "supported": True,
+                "mode": "manual",
+                "range": "macro",
+                "lens_position": 2.5,
+                "mode_options": [],
+                "range_options": [],
+                "ranges": {},
+            }
+        )
+        camera.resolution_payload = Mock(
+            return_value={
+                "width": 1280,
+                "height": 720,
+                "options": [{"width": 1280, "height": 720, "label": "1280 x 720"}],
+            }
+        )
+        camera.snapshot_details = Mock(
+            return_value=SnapshotDetails(
+                exists=False,
+                path="/tmp/latest.jpg",
+                modified_at=None,
+                size_bytes=None,
+            )
+        )
+        camera.active_source = Mock(return_value=None)
+        camera.is_available = Mock(return_value=True)
+        camera.selected_source_id = Mock(return_value="pi-camera")
+        camera.selected_source_name = Mock(return_value="Pi Camera")
+        camera.network_camera_url = Mock(return_value=None)
+        camera.active_capture_target = Mock(return_value="/usr/bin/rpicam-still")
+        camera.list_sources = Mock(return_value=[])
+        camera.width = 1280
+        camera.height = 720
+
+        monitor = MonitorService(
+            camera=camera,
+            sense_hat=FakeSenseHat(),
+            motion_detector=FakeMotionDetector(),
+            timed_capture=FakeTimedCapture(),
+        )
+
+        payload = monitor.update_capture_settings(
+            autofocus_mode="manual",
+            autofocus_range="macro",
+            lens_position=2.5,
+        )
+
+        camera.set_autofocus_mode.assert_called_once_with("manual")
+        camera.set_autofocus_range.assert_called_once_with("macro")
+        camera.set_lens_position.assert_called_once_with(2.5)
+        self.assertEqual(payload["camera"]["focus"]["mode"], "manual")
+        self.assertEqual(payload["camera"]["focus"]["range"], "macro")
+        self.assertEqual(payload["camera"]["focus"]["lens_position"], 2.5)
 
     def test_archived_events_payload_passes_through_to_motion_detector(self):
         with TemporaryDirectory() as temp_dir:
